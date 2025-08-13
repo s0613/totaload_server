@@ -5,80 +5,75 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.codec.binary.Hex;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
-import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.*;
 
-/**
- * Gemini 이미지-설명 매칭 유틸
- * - 각 이미지와 설명의 일치 여부를 boolean로 반환
- * - 모델은 기본값 "gemini-2.0-flash" (exp 지양)
- */
 @Component
 public class Gemini {
 
-    private final RestTemplate restTemplate;
+    private final WebClient webClient;
     private final String apiKey;
-    private final String baseUrl;
     private final String model;
     private final ObjectMapper objectMapper;
+    private final HttpClient httpClient;
 
     public Gemini(@Value("${gemini.api-key}") String apiKey,
                   @Value("${gemini.base-url}") String baseUrl,
-                  @Value("${gemini.model:gemini-2.0-flash}") String model) {
+                  @Value("${gemini.model:gemini-2.0-flash}") String model,
+                  WebClient.Builder webClientBuilder) {
         this.apiKey = Objects.requireNonNull(apiKey, "gemini.api-key is null");
-        this.baseUrl = Objects.requireNonNull(baseUrl, "gemini.base-url is null");
         this.model = Objects.requireNonNull(model, "gemini.model is null");
         this.objectMapper = new ObjectMapper();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
 
-        // 타임아웃 설정
-        HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory();
-        factory.setConnectTimeout(5_000);
-        factory.setReadTimeout(20_000);
-        this.restTemplate = new RestTemplate(factory);
+        this.webClient = webClientBuilder
+                .baseUrl(baseUrl)
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(50 * 1024 * 1024))
+                .build();
     }
 
-    /**
-     * 이미지와 설명의 일치 여부를 판정한다.
-     * @param imageBytesList 이미지 바이트 배열 리스트 (각 항목이 한 이미지)
-     * @param descriptions 각 이미지에 대한 설명 (동일 인덱스)
-     * @return 각 항목의 true/false 결과 리스트
-     */
-    public List<Boolean> checkImageDescriptions(List<byte[]> imageBytesList, List<String> descriptions) {
-        if (imageBytesList == null || descriptions == null) {
-            throw new IllegalArgumentException("이미지 리스트와 설명 리스트가 null입니다.");
+    public List<Boolean> checkImageDescriptions(List<String> imageUrls, List<String> descriptions) {
+        if (imageUrls == null || descriptions == null) {
+            throw new IllegalArgumentException("이미지 URL 리스트와 설명 리스트가 null입니다.");
         }
-        if (imageBytesList.size() != descriptions.size()) {
-            throw new IllegalArgumentException("이미지 리스트와 설명 리스트의 크기가 다릅니다.");
+        if (imageUrls.size() != descriptions.size()) {
+            throw new IllegalArgumentException("이미지 URL 리스트와 설명 리스트의 크기가 다릅니다.");
         }
-        if (imageBytesList.isEmpty()) {
+        if (imageUrls.isEmpty()) {
             return Collections.emptyList();
         }
 
         try {
+            // URL에서 이미지 다운로드
+            List<byte[]> imageBytesList = downloadImages(imageUrls);
+
             Map<String, Object> requestBody = createRequestBody(imageBytesList, descriptions);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
+            String response = webClient.post()
+                    .uri("/v1beta/models/" + model + ":generateContent?key=" + apiKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .timeout(Duration.ofSeconds(60))
+                    .block();
 
-            HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
+            return parseResponse(response, descriptions.size());
 
-            String url = baseUrl + "/v1beta/models/" + model + ":generateContent?key=" + apiKey;
-
-            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
-
-            // HTTP 상태 코드 체크
-            if (!response.getStatusCode().is2xxSuccessful()) {
-                throw new RuntimeException("Gemini API HTTP 오류: " + response.getStatusCodeValue());
-            }
-            return parseResponse(response.getBody(), descriptions.size());
-
-        } catch (HttpStatusCodeException e) {
+        } catch (WebClientResponseException e) {
             String body = e.getResponseBodyAsString();
             throw new RuntimeException("Gemini API 호출 실패: HTTP " + e.getStatusCode().value() + " - " + safeBody(body), e);
         } catch (Exception e) {
@@ -86,12 +81,74 @@ public class Gemini {
         }
     }
 
-    /**
-     * 요청 본문 구성
-     * - 이미지와 해당 설명을 번갈아(parts에 interleave) 추가
-     * - JSON 배열(boolean[]) 출력 강제
-     */
+    private List<byte[]> downloadImages(List<String> imageUrls) {
+        List<byte[]> imageBytesList = new ArrayList<>();
+
+        for (int i = 0; i < imageUrls.size(); i++) {
+            String url = imageUrls.get(i);
+            if (url == null || url.trim().isEmpty()) {
+                throw new IllegalArgumentException("이미지 URL이 비어있습니다: " + (i + 1) + "번째");
+            }
+
+            try {
+                byte[] imageBytes;
+
+                // data URI scheme 처리
+                if (url.startsWith("data:")) {
+                    imageBytes = decodeDataUri(url);
+                } else {
+                    // HTTP URL 처리
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .uri(URI.create(url.trim()))
+                            .timeout(Duration.ofSeconds(10))
+                            .build();
+
+                    HttpResponse<byte[]> response = httpClient.send(request,
+                            HttpResponse.BodyHandlers.ofByteArray());
+
+                    if (response.statusCode() != 200) {
+                        throw new RuntimeException("이미지 다운로드 실패: HTTP " + response.statusCode() +
+                                " for URL: " + url);
+                    }
+
+                    imageBytes = response.body();
+                }
+
+                if (imageBytes == null || imageBytes.length == 0) {
+                    throw new RuntimeException("빈 이미지 데이터: " + url);
+                }
+
+                imageBytesList.add(imageBytes);
+
+            } catch (IOException | InterruptedException e) {
+                throw new RuntimeException("이미지 다운로드 중 오류 발생: " + url + " - " + e.getMessage(), e);
+            }
+        }
+
+        return imageBytesList;
+    }
+
+    private byte[] decodeDataUri(String dataUri) {
+        try {
+            // data:image/jpeg;base64,/9j/4AAQ... 형식에서 base64 부분만 추출
+            if (!dataUri.contains(",")) {
+                throw new IllegalArgumentException("잘못된 data URI 형식: " + dataUri);
+            }
+
+            String[] parts = dataUri.split(",", 2);
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("잘못된 data URI 형식: " + dataUri);
+            }
+
+            String base64Data = parts[1];
+            return Base64.getDecoder().decode(base64Data);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("data URI 디코딩 실패: " + e.getMessage(), e);
+        }
+    }
+
     private Map<String, Object> createRequestBody(List<byte[]> images, List<String> descs) {
+        // 기존 코드와 동일
         Map<String, Object> body = new HashMap<>();
         List<Map<String, Object>> contents = new ArrayList<>();
 
@@ -115,7 +172,6 @@ public class Gemini {
             parts.add(textPart);
         }
 
-        // 최종 출력 요구: 오직 JSON 배열로만 반환
         Map<String, Object> finalInstruction = new HashMap<>();
         finalInstruction.put("text",
                 "위에 제시된 순서대로 각 이미지-설명 쌍의 결과를 판단하세요. " +
@@ -126,7 +182,6 @@ public class Gemini {
         userMsg.put("parts", parts);
         contents.add(userMsg);
 
-        // generationConfig: JSON 배열(Boolean) 스키마 강제
         Map<String, Object> genCfg = new HashMap<>();
         genCfg.put("response_mime_type", "application/json");
 
@@ -143,19 +198,14 @@ public class Gemini {
         return body;
     }
 
-    /**
-     * 응답 파싱
-     * - candidates[0].content.parts[0].text 가 JSON 배열 문자열이어야 함
-     * - safety block / prompt feedback 등 예외 케이스 처리
-     */
     private List<Boolean> parseResponse(String response, int expectedSize) {
+        // 기존 코드와 동일
         if (response == null || response.isBlank()) {
             throw new IllegalStateException("빈 응답을 수신했습니다.");
         }
         try {
             JsonNode root = objectMapper.readTree(response);
 
-            // safety block 혹은 promptFeedback 확인
             JsonNode promptFeedback = root.path("promptFeedback");
             if (!promptFeedback.isMissingNode()) {
                 JsonNode blockReason = promptFeedback.path("blockReason");
@@ -176,16 +226,13 @@ public class Gemini {
                 throw new IllegalStateException("응답에 parts가 없습니다.");
             }
 
-            // JSON 배열 문자열을 기대
             JsonNode textNode = parts.get(0).path("text");
             if (textNode.isMissingNode() || textNode.asText().isBlank()) {
                 throw new IllegalStateException("응답 텍스트를 찾을 수 없습니다.");
             }
 
-            // 모델이 실제 JSON 문자열을 반환하도록 강제했으므로 여기서 parse
             String jsonArrayText = textNode.asText().trim();
 
-            // 혹시 따옴표로 한번 더 싸였으면 제거 시도
             if (jsonArrayText.startsWith("\"") && jsonArrayText.endsWith("\"")) {
                 jsonArrayText = jsonArrayText.substring(1, jsonArrayText.length() - 1);
             }
@@ -200,9 +247,7 @@ public class Gemini {
                 out.add(n.asBoolean());
             }
 
-            // 결과 개수 검증(옵션)
             if (out.size() != expectedSize) {
-                // 크기가 다르면 모델이 빠뜨렸을 가능성 → 보수적으로 패딩
                 if (out.size() < expectedSize) {
                     while (out.size() < expectedSize) out.add(Boolean.FALSE);
                 } else {
@@ -215,18 +260,13 @@ public class Gemini {
         }
     }
 
-    /**
-     * 간단 MIME 식별 (JPEG/PNG/WEBP)
-     */
     private String detectMime(byte[] bytes) {
         if (bytes == null || bytes.length < 12) return "application/octet-stream";
 
-        // JPEG: FF D8 FF
         if (bytes.length >= 3 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8 && (bytes[2] & 0xFF) == 0xFF) {
             return "image/jpeg";
         }
 
-        // PNG: 89 50 4E 47 0D 0A 1A 0A
         if (bytes.length >= 8) {
             byte[] sig = Arrays.copyOf(bytes, 8);
             String hex = Hex.encodeHexString(sig).toLowerCase(Locale.ROOT);
@@ -235,7 +275,6 @@ public class Gemini {
             }
         }
 
-        // WEBP: "RIFF" .... "WEBP"
         if (bytes.length >= 12) {
             String riff = new String(Arrays.copyOfRange(bytes, 0, 4));
             String webp = new String(Arrays.copyOfRange(bytes, 8, 12));
@@ -244,7 +283,7 @@ public class Gemini {
             }
         }
 
-        return "image/jpeg"; // 기본값
+        return "image/jpeg";
     }
 
     private static String safeBody(String s) {
@@ -256,15 +295,5 @@ public class Gemini {
         if (s == null) return "";
         if (s.length() <= max) return s;
         return s.substring(0, max) + "...(truncated)";
-    }
-
-    // 디버깅 보조: 바이트를 앞부분만 hex로
-    @SuppressWarnings("unused")
-    private static String headHex(byte[] bytes, int len) {
-        int n = Math.min(len, bytes.length);
-        ByteBuffer buf = ByteBuffer.wrap(Arrays.copyOf(bytes, n));
-        byte[] head = new byte[n];
-        buf.get(head);
-        return Hex.encodeHexString(head);
     }
 }

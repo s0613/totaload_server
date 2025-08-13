@@ -2,11 +2,11 @@ package com.isoplatform.api.certification.controller;
 
 import com.isoplatform.api.certification.request.CertificateRequest;
 import com.isoplatform.api.certification.service.CertificateService;
+import com.isoplatform.api.security.ApiKeyService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 
@@ -17,24 +17,33 @@ import org.springframework.web.bind.annotation.*;
 public class CertificateController {
 
     private final CertificateService certificateService;
+    private final ApiKeyService apiKeyService;
 
     /**
      * 인증서 생성
      */
     @PostMapping("/issue")
-    public ResponseEntity<Void> issueCertificate(
+    public ResponseEntity<String> issueCertificate(
             @Valid @RequestBody CertificateRequest request,
-            Authentication authentication) {
+            @RequestHeader("X-API-KEY") String apiKey) {
 
-        log.info("인증서 발급 요청 - VIN: {}, 발급자: {}", request.getVin(), authentication.getName());
+        log.info("인증서 발급 요청 - VIN: {}", request.getVin());
+
+        // 보안 강화된 API 키 검증
+        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
+
+        if (!validationResult.isValid()) {
+            log.warn("인증서 발급 실패 - VIN: {}, 이유: {}", request.getVin(), validationResult.getMessage());
+            return ResponseEntity.status(401).body("Unauthorized: " + validationResult.getMessage());
+        }
 
         try {
-            certificateService.issueCertificate(request, authentication.getName());
+            certificateService.issueCertificate(request, "API_USER");
             log.info("인증서 발급 완료 - VIN: {}", request.getVin());
-            return ResponseEntity.ok().build();
+            return ResponseEntity.ok("Certificate issued successfully");
         } catch (Exception e) {
             log.error("인증서 발급 실패 - VIN: {}, 오류: {}", request.getVin(), e.getMessage());
-            return ResponseEntity.internalServerError().build();
+            return ResponseEntity.internalServerError().body("Failed to issue certificate: " + e.getMessage());
         }
     }
 

@@ -4,7 +4,6 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -44,6 +43,6 @@ public class CertificateRequest {
     private String issuedBy;       // 발급기관명 (컨트롤러에서 전달되지만 요청에서도 받을 수 있음)
 
     // 이미지-설명 검증을 위한 필드들
-    private List<MultipartFile> images;      // 검증할 이미지들
+    private List<String> imageUrls;          // 검증할 이미지 URL들
     private List<String> descriptions;       // 각 이미지에 대한 설명들
 }

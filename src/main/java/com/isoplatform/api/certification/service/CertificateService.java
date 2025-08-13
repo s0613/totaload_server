@@ -38,8 +38,8 @@ public class CertificateService {
             if (dup != null) return toResponse(dup);
 
             // 이미지-설명 검증
-            if (req.getImages() != null && !req.getImages().isEmpty()) {
-                validateImagesWithDescriptions(req.getImages(), req.getDescriptions());
+            if (req.getImageUrls() != null && !req.getImageUrls().isEmpty()) {
+                validateImagesWithDescriptions(req.getImageUrls(), req.getDescriptions());
             }
 
             // 인증서 생성
@@ -61,23 +61,14 @@ public class CertificateService {
         }
     }
 
-    private void validateImagesWithDescriptions(List<MultipartFile> images, List<String> descriptions) {
-        if (descriptions == null || images.size() != descriptions.size()) {
+    private void validateImagesWithDescriptions(List<String> imageUrls, List<String> descriptions) {
+        if (descriptions == null || imageUrls.size() != descriptions.size()) {
             throw new IllegalArgumentException("이미지와 설명의 개수가 일치하지 않습니다.");
         }
 
         try {
-            // MultipartFile을 byte[]로 변환
-            List<byte[]> imageBytesList = new ArrayList<>();
-            for (MultipartFile image : images) {
-                if (image.isEmpty()) {
-                    throw new IllegalArgumentException("빈 이미지 파일이 포함되어 있습니다.");
-                }
-                imageBytesList.add(image.getBytes());
-            }
-
             // Gemini API로 이미지-설명 일치 여부 확인
-            List<Boolean> validationResults = gemini.checkImageDescriptions(imageBytesList, descriptions);
+            List<Boolean> validationResults = gemini.checkImageDescriptions(imageUrls, descriptions);
 
             // 모든 이미지가 설명과 일치하는지 확인
             for (int i = 0; i < validationResults.size(); i++) {
@@ -88,7 +79,7 @@ public class CertificateService {
                 }
             }
 
-            log.info("이미지-설명 검증 완료: {} 개 이미지 모두 통과", images.size());
+            log.info("이미지-설명 검증 완료: {} 개 이미지 모두 통과", imageUrls.size());
 
         } catch (Exception e) {
             log.error("이미지-설명 검증 실패", e);
