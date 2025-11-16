@@ -23,9 +23,11 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -221,7 +223,14 @@ public class CertificateService {
                 .mileage(c.getMileage())
                 .inspectorCode(c.getInspectorCode())
                 .inspectorName(c.getInspectorName())
+                // 발급자 ID 리스트 (iso-server 통합)
+                .issuerUserIds(c.getIssuerUserIds())
+                // 호환성을 위한 기존 발급자 정보
                 .issuedBy(c.getIssuedBy())
+                .issuedByName(c.getIssuedByName())
+                .issuedByCompany(c.getIssuedByCompany())
+                .issuedAt(c.getIssuedAt())
+                .issuerUserId(c.getIssuerUserId())
                 .pdfFilePath(c.getPdfUrl())
                 .build();
     }
@@ -404,6 +413,125 @@ public class CertificateService {
         } catch (Exception e) {
             log.error("createAndGenerate 실패", e);
             throw new RuntimeException("인증서 생성 실패: " + e.getMessage(), e);
+        }
+    }
+
+    // ========== iso-server 통합: 인증서 관리 메서드들 ==========
+
+    /**
+     * 모든 인증서 조회 (iso-server 통합)
+     */
+    public List<CertificateResponse> getAllCertificates() {
+        try {
+            List<Certificate> certificates = certificateRepository.findAllWithIssuers();
+            return certificates.stream()
+                    .map(this::toResponse)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("getAllCertificates error", e);
+            throw new RuntimeException("인증서 조회 실패: " + e.getMessage());
+        }
+    }
+
+    /**
+     * ID로 인증서 조회 (iso-server 통합)
+     */
+    public CertificateResponse getCertificateById(Long id) {
+        try {
+            Certificate certificate = certificateRepository.findById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("해당 ID의 인증서를 찾을 수 없습니다: " + id));
+
+            return toResponse(certificate);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("getCertificateById error", e);
+            throw new RuntimeException("인증서 조회 실패: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 인증서 발급 요청 (실제 사용자 정보 활용) (iso-server 통합)
+     */
+    @Transactional
+    public CertificateResponse issueCertificateRequest(Long id, User issuer) {
+        try {
+            // 기존 인증서 조회
+            Certificate certificate = certificateRepository.findById(id)
+                    .orElseThrow(() -> new IllegalArgumentException("해당 ID의 인증서를 찾을 수 없습니다: " + id));
+
+            // 발급자 ID를 리스트에 추가
+            certificate.addIssuer(issuer.getId());
+
+            // 호환성을 위해 기존 필드도 업데이트 (첫 번째 발급자 또는 현재 발급자)
+            certificate.setIssuedBy(issuer.getEmail());
+            certificate.setIssuedByName(issuer.getName());
+            certificate.setIssuedByCompany(issuer.getCompany());
+            certificate.setIssuedAt(LocalDateTime.now());
+            certificate.setIssuerUserId(issuer.getId());
+
+            // 인증서 저장
+            Certificate updatedCertificate = certificateRepository.save(certificate);
+
+            log.info("인증서 발급 완료 - ID: {}, 인증번호: {}, VIN: {}, 발급자: {} ({}), 총 발급자 수: {}",
+                    updatedCertificate.getId(),
+                    updatedCertificate.getCertNumber(),
+                    updatedCertificate.getVin(),
+                    issuer.getName(),
+                    issuer.getEmail(),
+                    updatedCertificate.getIssuerUserIds().size());
+
+            return toResponse(updatedCertificate);
+        } catch (IllegalArgumentException e) {
+            log.warn("issueCertificateRequest - 인증서를 찾을 수 없음: {}", e.getMessage());
+            throw e;
+        } catch (Exception e) {
+            log.error("issueCertificateRequest error", e);
+            throw new RuntimeException("인증서 발급 요청 실패: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 인증서에 발급자 추가 (iso-server 통합)
+     */
+    @Transactional
+    public CertificateResponse addIssuerToCertificate(Long certificateId, Long issuerUserId) {
+        try {
+            Certificate certificate = certificateRepository.findById(certificateId)
+                    .orElseThrow(() -> new IllegalArgumentException("해당 ID의 인증서를 찾을 수 없습니다: " + certificateId));
+
+            // 발급자 ID를 리스트에 추가
+            certificate.addIssuer(issuerUserId);
+
+            // 인증서 저장
+            Certificate updatedCertificate = certificateRepository.save(certificate);
+
+            log.info("인증서 발급자 추가 완료 - 인증서 ID: {}, 발급자 ID: {}, 총 발급자 수: {}",
+                    certificateId, issuerUserId, updatedCertificate.getIssuerUserIds().size());
+
+            return toResponse(updatedCertificate);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("addIssuerToCertificate error", e);
+            throw new RuntimeException("발급자 추가 실패: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 특정 발급자가 발급한 인증서 조회 (iso-server 통합)
+     */
+    public List<CertificateResponse> getCertificatesByIssuer(Long issuerUserId) {
+        try {
+            // JOIN FETCH를 사용하여 한 번의 쿼리로 해결 (N+1 문제 해결)
+            List<Certificate> certificates = certificateRepository.findByIssuerUserIdWithFetch(issuerUserId);
+
+            return certificates.stream()
+                    .map(this::toResponse)
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("getCertificatesByIssuer error", e);
+            throw new RuntimeException("발급자별 인증서 조회 실패: " + e.getMessage());
         }
     }
 }

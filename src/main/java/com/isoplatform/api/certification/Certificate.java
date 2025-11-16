@@ -10,6 +10,9 @@ import lombok.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "certificates")
@@ -139,8 +142,23 @@ public class Certificate {
     // 서명 이미지 (선택)
     private String signaturePath;  // Authorized Signature 이미지 경로 (S3 또는 서버 경로)
 
-    // 발급 메타데이터
-    private String issuedBy;       // 발급자(관리자 아이디 등)
+    // 발급자 ID 리스트 (JSON 형태로 저장) - iso-server 통합
+    @ElementCollection
+    @CollectionTable(name = "certificate_issuers", joinColumns = @JoinColumn(name = "certificate_id"))
+    @Column(name = "issuer_user_id")
+    @Builder.Default
+    private List<Long> issuerUserIds = new ArrayList<>();
+
+    // 발급 메타데이터 - 호환성을 위해 유지
+    private String issuedBy;       // 발급자 이메일
+    private String issuedByName;   // 발급자 성명
+    private String issuedByCompany; // 발급자 소속회사
+
+    @Column(name = "issued_at")
+    private LocalDateTime issuedAt; // 발급 시각
+
+    @Column(name = "issuer_user_id")
+    private Long issuerUserId;     // 발급자 User ID (FK 역할)
 
     // Verification
     private Boolean verified;      // 검증 여부
@@ -148,4 +166,24 @@ public class Certificate {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "verified_by")
     private User verifiedBy;       // 검증한 사용자
+
+    // 헬퍼 메서드들 - iso-server 통합
+    public void addIssuer(Long userId) {
+        if (issuerUserIds == null) {
+            issuerUserIds = new ArrayList<>();
+        }
+        if (!issuerUserIds.contains(userId)) {
+            issuerUserIds.add(userId);
+        }
+    }
+
+    public void removeIssuer(Long userId) {
+        if (issuerUserIds != null) {
+            issuerUserIds.remove(userId);
+        }
+    }
+
+    public boolean hasIssuer(Long userId) {
+        return issuerUserIds != null && issuerUserIds.contains(userId);
+    }
 }
