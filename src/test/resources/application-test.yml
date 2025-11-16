@@ -1,0 +1,59 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: true
+
+  h2:
+    console:
+      enabled: true
+
+# AWS 설정 (테스트용 더미)
+cloud:
+  aws:
+    credentials:
+      access-key: test-access-key
+      secret-key: test-secret-key
+    region:
+      static: us-east-1
+    s3:
+      bucket: test-bucket
+      stack.auto: false
+    cloudfront:
+      distribution-domain: test.cloudfront.net
+
+# Gemini API (테스트용 더미)
+gemini:
+  api-key: test-gemini-api-key
+  base-url: https://generativelanguage.googleapis.com
+
+# JWT 설정 (테스트용)
+jwt:
+  secret: test-secret-key-for-jwt-token-generation-at-least-256-bits-long
+  expiration-time: 3600000
+
+# 프론트엔드 URL 설정
+frontend:
+  url: http://localhost:3000
+
+# Security API Keys
+security:
+  api-keys:
+    keys:
+      qload: test-qload-api-key
+      test: test-api-key
+
+logging:
+  level:
+    com.isoplatform: DEBUG
+    org.hibernate.SQL: DEBUG

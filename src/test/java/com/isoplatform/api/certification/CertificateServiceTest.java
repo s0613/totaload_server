@@ -1,18 +1,33 @@
 package com.isoplatform.api.certification;
 
+import com.isoplatform.api.auth.Role;
+import com.isoplatform.api.auth.User;
+import com.isoplatform.api.auth.repository.UserRepository;
 import com.isoplatform.api.certification.repository.CertificateRepository;
 import com.isoplatform.api.certification.request.CertificateRequest;
 import com.isoplatform.api.certification.response.CertificateResponse;
 import com.isoplatform.api.certification.service.CertificateService;
+import com.isoplatform.api.util.Gemini;
+import com.isoplatform.api.util.PDFParser;
+import com.isoplatform.api.util.PdfImageConverter;
+import com.isoplatform.api.util.S3Service;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.persistence.EntityManager;
 import java.time.LocalDate;
+import java.util.Collections;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -25,8 +40,63 @@ public class CertificateServiceTest {
     @Autowired
     private CertificateRepository certificateRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    @MockBean
+    private S3Service s3Service;
+
+    @MockBean
+    private Gemini gemini;
+
+    @MockBean
+    private PDFParser pdfParser;
+
+    @MockBean
+    private PdfImageConverter pdfImageConverter;
+
+    private User testUser;
+
+    @BeforeEach
+    public void setUp() throws Exception {
+        // 테스트 사용자 생성 및 DB에 저장
+        testUser = User.builder()
+                .email("test@example.com")
+                .password("password")
+                .name("테스트 사용자")
+                .role(Role.USER)
+                .build();
+
+        // 사용자 저장
+        testUser = userRepository.save(testUser);
+        entityManager.flush();
+
+        // PDFParser 모킹 - PDF 생성 시뮬레이션
+        when(pdfParser.createCertificatePdf(any()))
+                .thenReturn("/tmp/test-certificate.pdf");
+
+        // S3Service 모킹 - S3 업로드 시뮬레이션
+        when(s3Service.uploadFile(anyString(), anyString()))
+                .thenReturn(com.isoplatform.api.util.S3UploadResult.builder()
+                        .s3Key("certificates/test.pdf")
+                        .cloudFrontUrl("https://test.cloudfront.net/certificates/test.pdf")
+                        .build());
+
+        // SecurityContext 설정
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(
+                        "test@example.com",
+                        "password",
+                        Collections.emptyList()
+                );
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
     @Test
-    public void testIssueCertificate() {
+    public void testCreateAndGenerate() {
         // Given
         CertificateRequest request = new CertificateRequest();
         request.setVin("KMHD35LE5HU123456");
@@ -40,7 +110,7 @@ public class CertificateServiceTest {
         request.setInspectorName("김검사");
 
         // When
-        CertificateResponse response = certificateService.issueCertificate(request, "admin");
+        CertificateResponse response = certificateService.createAndGenerate(request);
 
         // Then
         assertNotNull(response);
@@ -48,14 +118,13 @@ public class CertificateServiceTest {
         assertEquals(request.getVin(), response.getVin());
         assertEquals(request.getManufacturer(), response.getManufacturer());
         assertEquals(request.getModelName(), response.getModelName());
-        assertEquals("admin", response.getIssuedBy());
 
         // 데이터베이스에 저장되었는지 확인
         assertTrue(certificateRepository.existsByVin(request.getVin()));
     }
 
     @Test
-    public void testDuplicateVinThrowsException() {
+    public void testDuplicateVinReturnsExisting() {
         // Given
         CertificateRequest request = new CertificateRequest();
         request.setVin("KMHD35LE5HU123456");
@@ -65,12 +134,15 @@ public class CertificateServiceTest {
         request.setInspectorCode("INS001");
         request.setInspectorName("김검사");
 
-        // 첫 번째 인증서 발급
-        certificateService.issueCertificate(request, "admin");
+        // 첫 번째 인증서 생성
+        CertificateResponse first = certificateService.createAndGenerate(request);
 
-        // When & Then
-        assertThrows(IllegalArgumentException.class, () -> {
-            certificateService.issueCertificate(request, "admin");
-        });
+        // When - 같은 VIN으로 다시 요청
+        CertificateResponse second = certificateService.createAndGenerate(request);
+
+        // Then - 기존 인증서를 반환해야 함
+        assertNotNull(second);
+        assertEquals(first.getCertNumber(), second.getCertNumber());
+        assertEquals(first.getVin(), second.getVin());
     }
 }
