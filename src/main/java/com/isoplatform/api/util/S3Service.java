@@ -11,6 +11,9 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -62,6 +65,26 @@ public class S3Service {
             log.error("S3 업로드 중 오류 - file: {}, key: {}", localFilePath, s3Key, e);
             throw new RuntimeException("S3 업로드 실패: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 여러 이미지 파일을 S3에 업로드하고 URL 리스트를 반환합니다.
+     *
+     * @param imagePaths 로컬 이미지 파일 경로 리스트
+     * @return CloudFront URL 리스트
+     */
+    public List<String> uploadImages(List<String> imagePaths) {
+        List<String> imageUrls = new ArrayList<>();
+
+        for (String imagePath : imagePaths) {
+            String filename = new File(imagePath).getName();
+            String s3Key = "certificate-images/" + UUID.randomUUID() + "-" + filename;
+            S3UploadResult result = uploadFile(imagePath, s3Key);
+            imageUrls.add(result.getCloudFrontUrl());
+        }
+
+        log.info("이미지 {} 개 S3 업로드 완료", imageUrls.size());
+        return imageUrls;
     }
 
     public void deleteLocalFile(String localFilePath) {

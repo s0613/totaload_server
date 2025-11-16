@@ -2,106 +2,177 @@ package com.isoplatform.api.util;
 
 import com.isoplatform.api.certification.Certificate;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
-import org.apache.pdfbox.pdmodel.font.PDCIDFontType0;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
-import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
-import org.apache.pdfbox.pdmodel.interactive.form.PDField;
-import org.apache.pdfbox.pdmodel.interactive.form.PDNonTerminalField;
-import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
-import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.pdmodel.interactive.form.*;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import java.util.Arrays;
 
 @Slf4j
 @Component
 public class PDFParser {
 
-    private static final String TEMPLATE_PDF = "static/ISO_acrobat.pdf";
+    private static final String TEMPLATE_PDF = "static/ISO_acrobat07.pdf";
 
-    private static final String FONT_PRIMARY = "static/fonts/Pretendard-Medium.ttf";
-    private static final String FONT_FALLBACK_TTF = "static/fonts/NotoSansKR-Regular.ttf";
+    // TTF 우선(가장 안정적), 필요시 예비 후보
+    private static final String[] FONT_CANDIDATES = new String[] {
+            "static/fonts/NotoSansKR-Light.ttf",
+            "static/fonts/NotoSansKR-Regular.ttf",
+            "static/fonts/NanumGothic.ttf",
+            "static/fonts/NotoSansCJKkr-Regular.otf"
+    };
 
-    private static final String OUTPUT_DIR   = "certificates/";
+    private static final String FONT_RESOURCE_NAME = "NotoSansKR-Light";
     private static final DateTimeFormatter DF_KR = DateTimeFormatter.ofPattern("yyyy년 MM월 dd일");
 
-    private static final COSName ALIAS_F1 = COSName.getPDFName("F1"); // 메인 폰트 별칭
+    public String createCertificatePdf(Certificate c) throws Exception {
+        Path outDir = Paths.get("certificates");
+        Files.createDirectories(outDir);
+        String outFile = outDir.resolve(c.getCertNumber() + ".pdf").toString();
 
-    public String parseFullText(InputStream inputStream) {
-        try (PDDocument document = PDDocument.load(inputStream)) {
-            PDFTextStripper stripper = new PDFTextStripper();
-            String text = stripper.getText(document);
-            log.debug("PDF 텍스트 추출(앞 500자): {}", text.substring(0, Math.min(500, text.length())));
-            return text;
-        } catch (IOException e) {
-            log.error("PDF 텍스트 추출 중 오류 발생", e);
-            throw new RuntimeException("PDF 텍스트 추출 중 오류가 발생했습니다.", e);
-        }
-    }
-
-    public String createCertificatePdf(Certificate certificate) throws Exception {
-        Path dir = Paths.get(OUTPUT_DIR);
-        if (!Files.exists(dir)) Files.createDirectories(dir);
-        String outFile = OUTPUT_DIR + certificate.getCertNumber() + ".pdf";
-
+        // 템플릿 로드
         ClassPathResource cpr = new ClassPathResource(TEMPLATE_PDF);
-        try (InputStream tmpl = cpr.getInputStream();
-             PDDocument doc   = PDDocument.load(tmpl)) {
+        if (!cpr.exists()) throw new IllegalStateException("템플릿을 찾을 수 없습니다: " + TEMPLATE_PDF);
+        byte[] templateBytes;
+        try (InputStream in = cpr.getInputStream()) {
+            templateBytes = in.readAllBytes();
+        }
 
+        try (PDDocument doc = Loader.loadPDF(templateBytes)) {
             PDAcroForm form = ensureAcroFormReady(doc);
 
-            log.info(">> PDF 폼 필드 목록 시작");
-            for (PDField f : getAllFields(form)) {
-                log.info("   • field ▶ {}", f.getFullyQualifiedName());
-            }
-            log.info(">> PDF 폼 필드 목록 끝");
+            // 폰트 임베딩 (서브셋팅 false: 전체 임베딩)
+            PDFont font = loadKoreanFontRobust(doc);
 
-            // F1 등록
-            PDFont f1 = embedMainFont(doc, form);
-
-            // AcroForm DR 내 모든 폰트 별칭을 F1로 강제 매핑(문제 폰트 별칭 사전 차단)
-            overrideAllDRFontsToF1(form, f1);
-
-            // 기본 DA 통일
-            String defaultDA = "/F1 12 Tf 0 g";
-            form.setDefaultAppearance(defaultDA);
-
-            // 모든 텍스트 필드에 DA 적용 + 기존 Appearance 제거
-            applyDAAndClearAppearanceOnAllTextFields(form, defaultDA);
-
-            // 값 채우기
-            fillFieldsLoosely(form, certificate);
-
-            // 새로 Appearance 생성
-            try {
-                form.refreshAppearances();
-            } catch (UnsupportedOperationException uoe) {
-                // 혹시 모를 잔여 케이스 완충
-                log.warn("refreshAppearances 중 UnsupportedOperationException 발생: {}", uoe.toString());
-                // 마지막 방어: NeedAppearances 힌트에 맡기고 flatten 시도
+            // DR/페이지 리소스 등록
+            PDResources dr = form.getDefaultResources();
+            COSName fontKey = COSName.getPDFName(FONT_RESOURCE_NAME);
+            dr.put(fontKey, font);
+            for (PDPage page : doc.getPages()) {
+                PDResources pr = page.getResources();
+                if (pr == null) { pr = new PDResources(); page.setResources(pr); }
+                pr.put(fontKey, font);
             }
 
-            // 플래튼
-            form.flatten();
+            // 전역 DA
+            final String da = "/" + FONT_RESOURCE_NAME + " 10 Tf 0 g";
+            form.setDefaultAppearance(da);
 
+            // 모든 텍스트 필드: DA 통일, 리치텍스트 off, 기존 AP 제거
+            for (PDField f : form.getFieldTree()) {
+                if (f instanceof PDTextField tf) {
+                    tf.setDefaultAppearance(da);
+                    tf.setRichText(false);
+                    for (PDAnnotationWidget w : tf.getWidgets()) {
+                        PDAppearanceDictionary ap = w.getAppearance();
+                        if (ap != null) w.setAppearance(null);
+                    }
+                }
+            }
+
+            // ========= 값 채우기 (템플릿 실제 필드에 맞춘 후보 매핑) =========
+            // 발급/검증
+            setTextToAny(form, new String[]{"certNumber"}, c.getCertNumber());
+            setTextToAny(form, new String[]{"issueDate"}, formatDateKR(c.getIssueDate()));
+            setTextToAny(form, new String[]{"inspectDate"}, formatDateKR(c.getInspectDate()));
+            setTextToAny(form, new String[]{"inspectorName"}, c.getInspectorName());
+            setTextToAny(form, new String[]{"inspectorCode"}, c.getInspectorCode());
+
+            // 템플릿에는 inspectCountry가 없고 inspectCount만 있음(오탈자 보정)
+            setTextToAny(form, new String[]{"inspectCountry","inspectCount"}, c.getInspectCountry());
+
+            // 템플릿에 없음 → 경고만
+            warnIfMissing(form, "inspectSite");
+            warnIfMissing(form, "eVerifyId");
+            warnIfMissing(form, "verifyUrl");
+            warnIfMissing(form, "disclaimer");
+
+            // 차량 식별
+            setTextToAny(form, new String[]{"manufacturer"}, c.getManufacturer());
+            setTextToAny(form, new String[]{"modelName"}, c.getModelName());
+            setTextToAny(form, new String[]{"vin"}, c.getVin());
+
+            // manufactureYear는 템플릿에 없고 manuYear만 존재 → 보정
+            String manuYearStr = c.getManuYear() != null ? c.getManuYear().toString()
+                    : (c.getManufactureYear() != null ? c.getManufactureYear().toString() : "");
+            setTextToAny(form, new String[]{"manuYear"}, manuYearStr);
+
+            setTextToAny(form, new String[]{"firstRegisterDate"}, formatDateKR(c.getFirstRegisterDate()));
+            setTextToAny(form, new String[]{"mileage"}, c.getMileage() == null ? "" : c.getMileage() + " km");
+            setTextToAny(form, new String[]{"variant"}, c.getVariant());
+
+            // engineDisplacement vs displacement → 템플릿에는 displacement만 있음
+            setTextToAny(form, new String[]{"displacement"}, or(c.getDisplacement(), c.getEngineDisplacement()));
+
+            setTextToAny(form, new String[]{"seatCount"}, toStr(c.getSeatCount()));
+            setTextToAny(form, new String[]{"fuelType"}, c.getFuelType());
+            setTextToAny(form, new String[]{"driveType"}, c.getDriveType());
+
+            // 템플릿에 없음 → 경고만
+            warnIfMissing(form, "engineNumber");
+            warnIfMissing(form, "modelYear");
+            warnIfMissing(form, "usecase");
+            warnIfMissing(form, "colorCode");
+            warnIfMissing(form, "doorCount");
+            warnIfMissing(form, "odoType");
+
+            // 치수·중량
+            setTextToAny(form, new String[]{"length"}, c.getLength());
+            setTextToAny(form, new String[]{"width"}, c.getWidth());
+            setTextToAny(form, new String[]{"height"}, c.getHeight());
+            setTextToAny(form, new String[]{"wheelbase"}, c.getWheelbase());
+            setTextToAny(form, new String[]{"trackFront"}, c.getTrackFront());
+            setTextToAny(form, new String[]{"gvm"}, c.getGvm());
+            setTextToAny(form, new String[]{"curbWeight"}, c.getCurbWeight());
+            setTextToAny(form, new String[]{"axleFront"}, c.getAxleFront());
+            // 템플릿에 axleRear 없음 → 경고
+            warnIfMissing(form, "axleRear");
+
+            // bodyType ↔ bobyType(템플릿 오탈자) → 보정
+            setTextToAny(form, new String[]{"bodyType","bobyType"}, c.getBodyType());
+
+            // 파워트레인·배출
+            setTextToAny(form, new String[]{"engineType"}, c.getEngineType());
+            setTextToAny(form, new String[]{"cylinderCount"}, toStr(c.getCylinderCount()));
+            setTextToAny(form, new String[]{"induction"}, c.getInduction());
+            setTextToAny(form, new String[]{"enginePower"}, c.getEnginePower());
+            setTextToAny(form, new String[]{"emissionStd"}, c.getEmissionStd());
+            setTextToAny(form, new String[]{"motorPower"}, c.getMotorPower());
+            setTextToAny(form, new String[]{"batteryVoltage"}, c.getBatteryVoltage());
+            setTextToAny(form, new String[]{"transmission"}, c.getTransmission());
+            setTextToAny(form, new String[]{"brakeType"}, c.getBrakeType());
+            setTextToAny(form, new String[]{"fuelEconomy"}, c.getFuelEconomy());
+
+            // 등급/결함
+            setTextToAny(form, new String[]{"jaaiGrade"}, c.getJaaiGrade());
+            setTextToAny(form, new String[]{"aisScore"}, c.getAisScore());
+            setTextToAny(form, new String[]{"repairHistory"}, c.getRepairHistory());
+            setTextToAny(form, new String[]{"comment"}, c.getComment());
+
+            // 수입국 규정
+            setTextToAny(form, new String[]{"destinationCountry"}, c.getDestinationCountry());
+            setTextToAny(form, new String[]{"validityNote"}, c.getValidityNote());
+
+            // 항균/방사선
+            setTextToAny(form, new String[]{"AntiResult"}, c.getRadiationResult());
+
+            // 저장
             doc.save(outFile);
             log.info("PDF 저장 완료: {}", outFile);
         }
@@ -112,232 +183,59 @@ public class PDFParser {
     private PDAcroForm ensureAcroFormReady(PDDocument doc) {
         PDDocumentCatalog catalog = doc.getDocumentCatalog();
         PDAcroForm form = catalog.getAcroForm();
-        if (form == null) {
-            throw new IllegalStateException("이 PDF에는 AcroForm이 없습니다. 템플릿을 확인하세요.");
-        }
-
-        // 뷰어가 Appearance 생성하도록 힌트(우리는 refreshAppearances도 호출)
-        form.setNeedAppearances(true);
-
-        if (form.getDefaultResources() == null) {
-            PDResources dr = new PDResources();
-            dr.put(COSName.getPDFName("Helv"), PDType1Font.HELVETICA);
-            form.setDefaultResources(dr);
-        }
-        if (form.getDefaultAppearance() == null || form.getDefaultAppearance().isEmpty()) {
-            form.setDefaultAppearance("/Helv 12 Tf 0 g");
-        }
+        if (form == null) throw new IllegalStateException("이 PDF에는 AcroForm이 없습니다.");
+        form.setNeedAppearances(false);
+        if (form.getDefaultResources() == null) form.setDefaultResources(new PDResources());
         return form;
     }
 
-    private PDFont embedMainFont(PDDocument doc, PDAcroForm form) {
-        PDType0Font f1 = null;
-
-        // 1차: Pretendard
-        try (InputStream is = new ClassPathResource(FONT_PRIMARY).getInputStream()) {
-            f1 = PDType0Font.load(doc, is, true);
-            log.info("폰트 임베드 시도: {}", FONT_PRIMARY);
-        } catch (Throwable t) {
-            log.warn("기본 폰트 로드 실패: {} -> {}", FONT_PRIMARY, t.toString());
-        }
-
-        boolean useFallback = false;
-        if (f1 == null) {
-            useFallback = true;
-        } else {
-            try {
-                if (f1.getDescendantFont() instanceof PDCIDFontType0) {
-                    // Pretendard가 CFF CID로 잡히는 변종 대비
-                    useFallback = true;
-                    log.warn("Pretendard가 CIDFontType0(CFF)로 로딩됨. 안전한 TTF로 교체합니다.");
-                } else {
-                    log.info("Pretendard가 CIDFontType2(또는 안전한 타입)로 로딩됨.");
-                }
-            } catch (Throwable t) {
-                useFallback = true;
-                log.warn("폰트 타입 점검 중 오류. 폴백 사용: {}", t.toString());
-            }
-        }
-
-        if (useFallback) {
-            try (InputStream is2 = new ClassPathResource(FONT_FALLBACK_TTF).getInputStream()) {
-                f1 = PDType0Font.load(doc, is2, true);
-                log.info("폴백 폰트 임베드 성공: {}", FONT_FALLBACK_TTF);
-            } catch (Throwable t2) {
-                log.error("폴백 폰트 로드 실패: {} -> {}", FONT_FALLBACK_TTF, t2.toString());
-                throw new RuntimeException(
-                        "필수 폰트를 로드할 수 없습니다. " +
-                                "TTF 한글 폰트를 클래스패스에 추가하세요: " + FONT_FALLBACK_TTF, t2);
-            }
-        }
-
-        // 폭 계산 사전 테스트
-        try {
-            f1.getStringWidth("한글 테스트:년월일_ABC123");
-        } catch (Throwable t) {
-            log.warn("폰트 폭 계산 테스트 경고: {}", t.toString());
-        }
-
-        // F1 등록
-        PDResources dr = form.getDefaultResources();
-        dr.put(ALIAS_F1, f1);
-
-        // 관성적으로 남아 있을 수 있는 Helv 별칭도 F1로 덮어쓰기(DA가 /Helv일 때 강제 차단)
-        dr.put(COSName.getPDFName("Helv"), f1);
-
-        log.info("폰트 임베드 완료: {}", (useFallback ? FONT_FALLBACK_TTF : FONT_PRIMARY));
-        return f1;
-    }
-
-    /**
-     * DR에 이미 등록되어 있는 모든 폰트 별칭을 F1로 강제 덮어씁니다.
-     * (문제가 되는 CFF CID Type0 폰트 별칭을 사전에 제거/대체)
-     */
-    private void overrideAllDRFontsToF1(PDAcroForm form, PDFont f1) {
-        PDResources dr = form.getDefaultResources();
-        List<COSName> names = new ArrayList<>();
-        for (COSName n : dr.getFontNames()) {
-            names.add(n);
-        }
-        for (COSName n : names) {
-            try {
-                PDFont existing = dr.getFont(n);
-                if (existing != null) {
-                    // 어떤 별칭이건 간에 F1로 통일
-                    dr.put(n, f1);
-                }
-            } catch (Exception ignore) {
-            }
-        }
-        // 최종적으로 /F1도 확실히 세팅
-        dr.put(ALIAS_F1, f1);
-    }
-
-    /**
-     * 모든 텍스트 필드에 DA를 적용하고, 기존 위젯 Appearance를 제거하여
-     * refreshAppearances가 F1만 사용해 새로 그리도록 강제합니다.
-     */
-    private void applyDAAndClearAppearanceOnAllTextFields(PDAcroForm form, String da) {
-        for (PDField field : getAllFields(form)) {
-            if (field instanceof PDTextField) {
-                PDTextField tf = (PDTextField) field;
-                tf.setDefaultAppearance(da);
-
-                // 위젯에 남아있는 Appearance를 제거(초기화)
-                for (PDAnnotationWidget widget : tf.getWidgets()) {
-                    try {
-                        PDAppearanceDictionary ap = widget.getAppearance();
-                        if (ap != null) {
-                            widget.setAppearance(null); // 기존 외형 제거
-                        }
-                    } catch (Exception e) {
-                        log.debug("위젯 Appearance 제거 실패(무시): {} ({})", field.getFullyQualifiedName(), e.getMessage());
-                    }
-                }
-            }
-        }
-    }
-
-    private List<PDField> getAllFields(PDAcroForm form) {
-        List<PDField> out = new ArrayList<>();
-        for (PDField f : form.getFields()) collectFieldsRecursively(f, out);
-        return out;
-    }
-
-    private void collectFieldsRecursively(PDField field, List<PDField> out) {
-        out.add(field);
-        if (field instanceof PDNonTerminalField) {
-            PDNonTerminalField nt = (PDNonTerminalField) field;
-            for (PDField kid : nt.getChildren()) collectFieldsRecursively(kid, out);
-        }
-    }
-
-    private List<PDField> resolveFieldsByBaseName(PDAcroForm form, String baseName) {
-        List<PDField> all = getAllFields(form);
-
-        List<PDField> exact = all.stream()
-                .filter(f -> baseName.equals(f.getFullyQualifiedName()))
-                .collect(Collectors.toList());
-        if (!exact.isEmpty()) return exact;
-
-        Pattern idxPat = Pattern.compile("^" + Pattern.quote(baseName) + "#\\d+$");
-        List<PDField> indexed = all.stream()
-                .filter(f -> {
-                    String n = f.getFullyQualifiedName();
-                    return n != null && idxPat.matcher(n).matches();
-                })
-                .sorted(Comparator.comparing(PDField::getFullyQualifiedName))
-                .collect(Collectors.toList());
-        if (!indexed.isEmpty()) return indexed;
-
-        List<PDField> prefixed = all.stream()
-                .filter(f -> {
-                    String n = f.getFullyQualifiedName();
-                    return n != null && (n.startsWith(baseName + "#") || n.startsWith(baseName + "."));
-                })
-                .sorted(Comparator.comparing(PDField::getFullyQualifiedName))
-                .collect(Collectors.toList());
-
-        return prefixed;
-    }
-
-    private void setTextToAll(PDAcroForm form, String baseName, String value) {
-        List<PDField> targets = resolveFieldsByBaseName(form, baseName);
-        if (targets.isEmpty()) {
-            log.warn("필드 없음: {}", baseName);
-            return;
-        }
-        String safe = value == null ? "" : value;
-
-        for (PDField f : targets) {
-            try {
-                if (f instanceof PDTextField) {
-                    ((PDTextField) f).setValue(safe);
-                } else {
-                    f.setValue(safe);
-                }
-                log.debug("필드 세팅 완료: {} ← '{}'", f.getFullyQualifiedName(), safe);
-            } catch (UnsupportedOperationException uoe1) {
-                // 최후 방어: ASCII 완화
-                String ascii = safe.replaceAll("[^\\x20-\\x7E]", " ");
-                try {
-                    if (f instanceof PDTextField) {
-                        ((PDTextField) f).setValue(ascii);
-                        log.warn("인코딩 실패로 ASCII 치환 적용: {} ← '{}'", f.getFullyQualifiedName(), ascii);
-                    } else {
-                        f.setValue(ascii);
-                    }
-                } catch (Exception e3) {
-                    log.error("필드 세팅 실패(ASCII도 실패): {} value='{}'", f.getFullyQualifiedName(), safe, e3);
-                }
+    private PDFont loadKoreanFontRobust(PDDocument doc) throws Exception {
+        Exception last = null;
+        for (String path : FONT_CANDIDATES) {
+            ClassPathResource res = new ClassPathResource(path);
+            if (!res.exists()) { log.warn("폰트 없음: {}", path); continue; }
+            try (InputStream is = res.getInputStream()) {
+                byte[] bytes = is.readAllBytes();
+                if (bytes.length == 0) { log.warn("빈 폰트 파일: {}", path); continue; }
+                log.info("폰트 로드 시도: {} ({} bytes)", path, bytes.length);
+                PDFont f = PDType0Font.load(doc, new java.io.ByteArrayInputStream(bytes), false);
+                log.info("폰트 로드 성공: {}", path);
+                return f;
             } catch (Exception e) {
-                log.error("setValue {} error: {}", f.getFullyQualifiedName(), e.getMessage(), e);
+                String msg = e.getMessage() == null ? "" : e.getMessage();
+                log.warn("폰트 로드 실패: {} ({})", path, msg);
+                last = e;
             }
+        }
+        throw new IllegalStateException("사용 가능한 한글 폰트를 로드하지 못했습니다. TTF 정식 풀셋을 우선 배치하세요.", last);
+    }
+
+    private void setTextToAny(PDAcroForm form, String[] candidateNames, String value) {
+        String safe = value == null ? "" : value;
+        for (String name : candidateNames) {
+            PDField f = form.getField(name);
+            if (f != null) {
+                try {
+                    if (f instanceof PDTextField tf) tf.setValue(safe);
+                    else f.setValue(safe);
+                    log.debug("필드 세팅: {} ← '{}'", name, safe);
+                    return;
+                } catch (Exception e) {
+                    log.error("필드 '{}' 값 세팅 실패: {}", name, e.getMessage(), e);
+                    return;
+                }
+            }
+        }
+        log.warn("매핑 실패(템플릿에 없음): {}", Arrays.toString(candidateNames));
+    }
+
+    private void warnIfMissing(PDAcroForm form, String name) {
+        if (form.getField(name) == null) {
+            log.warn("템플릿에 필드가 없습니다: {}", name);
         }
     }
 
-    private void fillFieldsLoosely(PDAcroForm form, Certificate c) {
-        setTextToAll(form, "certNumber",                  c.getCertNumber());
-        setTextToAll(form, "issueDate_es_:date",          formatDateKR(c.getIssueDate()));
-        setTextToAll(form, "expireDate_es_:date",         formatDateKR(c.getExpireDate()));
-        setTextToAll(form, "inspectDate_es_:date",        formatDateKR(c.getInspectDate()));
-        setTextToAll(form, "manu_es_:fullname",           c.getManufacturer());
-        setTextToAll(form, "modelName",                   c.getModelName());
-        setTextToAll(form, "vin",                         c.getVin());
-        setTextToAll(form, "manufactureYear_es_:date",    formatNumber(c.getManufactureYear()));
-        setTextToAll(form, "firstRegisterDate_es_:date",  formatDateKR(c.getFirstRegisterDate()));
-        setTextToAll(form, "mileage",                     c.getMileage() != null ? c.getMileage() + " km" : "");
-        setTextToAll(form, "corpName_es_:fullname",       c.getIssuedBy());
-        setTextToAll(form, "inspectorCode",               c.getInspectorCode());
-        setTextToAll(form, "inspectorName_es_:fullname",  c.getInspectorName());
-        // 주의: 서명 필드(Signature...)에는 값 세팅 금지
-    }
-
-    private String formatDateKR(LocalDate d) {
-        return d == null ? "" : d.format(DF_KR);
-    }
-
-    private String formatNumber(Number n) {
-        return n == null ? "" : n.toString();
-    }
+    private String formatDateKR(LocalDate d) { return d == null ? "" : d.format(DF_KR); }
+    private String toStr(Number n) { return n == null ? "" : n.toString(); }
+    private String or(String a, String b) { return (a != null && !a.isEmpty()) ? a : (b == null ? "" : b); }
 }
