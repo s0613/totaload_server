@@ -274,27 +274,63 @@ public class CertificateService {
             List<String> imageUrls = s3Service.uploadImages(imagePaths);
             log.info("이미지 S3 업로드 완료: {} 개", imageUrls.size());
 
-            // 4. Gemini AI 분석 (기존 checkImageDescriptions 활용 또는 새 메서드 호출)
-            // TODO: Task 5에서 analyzeCertificate() 메서드 추가 후 여기서 호출
-            // JsonNode aiAnalysis = gemini.analyzeCertificate(imageUrls);
+            // 4. Gemini AI 분석
+            JsonNode aiAnalysis = gemini.analyzeCertificate(imageUrls);
+            log.info("AI 분석 완료: {}", aiAnalysis);
 
-            // 임시: 빈 분석 결과
-            JsonNode aiAnalysis = objectMapper.createObjectNode()
-                    .put("status", "pending")
-                    .put("note", "AI analysis will be implemented in Task 5");
-            BigDecimal aiConfidence = BigDecimal.valueOf(0.0);
+            // 5. AI 분석 결과에서 필드 추출
+            String manufacturer = aiAnalysis.path("manufacturer").asText("UNKNOWN");
+            String modelName = aiAnalysis.path("modelName").asText("UNKNOWN");
+            String vin = aiAnalysis.path("vin").asText("VIN-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+            Integer manuYear = aiAnalysis.path("manuYear").isNull() ? null : aiAnalysis.path("manuYear").asInt();
+            String displacement = aiAnalysis.path("displacement").asText(null);
+            String fuelType = aiAnalysis.path("fuelType").asText(null);
+            Integer seatCount = aiAnalysis.path("seatCount").isNull() ? null : aiAnalysis.path("seatCount").asInt();
+            String variant = aiAnalysis.path("variant").asText(null);
+            String inspectCountry = aiAnalysis.path("inspectCountry").asText(null);
+            Integer mileage = aiAnalysis.path("mileage").isNull() ? null : aiAnalysis.path("mileage").asInt();
+            String colorCode = aiAnalysis.path("colorCode").asText(null);
+            String engineNumber = aiAnalysis.path("engineNumber").asText(null);
 
-            // 5. Certificate 엔티티 생성 및 저장
+            // 신뢰도 추출
+            BigDecimal aiConfidence = aiAnalysis.path("confidence").isNull()
+                    ? BigDecimal.valueOf(0.0)
+                    : BigDecimal.valueOf(aiAnalysis.path("confidence").asDouble());
+
+            // 검사일자 파싱
+            LocalDate inspectDate = null;
+            String inspectDateStr = aiAnalysis.path("inspectDate").asText(null);
+            if (inspectDateStr != null && !inspectDateStr.isBlank()) {
+                try {
+                    inspectDate = LocalDate.parse(inspectDateStr);
+                } catch (Exception e) {
+                    log.warn("검사일자 파싱 실패: {}", inspectDateStr, e);
+                    inspectDate = LocalDate.now();
+                }
+            } else {
+                inspectDate = LocalDate.now();
+            }
+
+            // 6. Certificate 엔티티 생성 및 저장
             Certificate cert = Certificate.builder()
                     .user(currentUser)
                     .certNumber(genCert())
                     .issueDate(LocalDate.now())
                     .expireDate(LocalDate.now().plusYears(1))
-                    .inspectDate(LocalDate.now())
-                    // 나머지 필드는 AI 분석 결과에서 추출 (Task 5에서 구현)
-                    .manufacturer("PENDING")
-                    .modelName("PENDING")
-                    .vin("PENDING-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase())
+                    .inspectDate(inspectDate)
+                    // AI 분석 결과로 필드 채우기
+                    .manufacturer(manufacturer)
+                    .modelName(modelName)
+                    .vin(vin)
+                    .manuYear(manuYear)
+                    .displacement(displacement)
+                    .fuelType(fuelType)
+                    .seatCount(seatCount)
+                    .variant(variant)
+                    .inspectCountry(inspectCountry)
+                    .mileage(mileage)
+                    .colorCode(colorCode)
+                    .engineNumber(engineNumber)
                     .aiAnalysis(aiAnalysis)
                     .aiConfidence(aiConfidence)
                     .verified(false)
@@ -303,7 +339,7 @@ public class CertificateService {
             certificateRepository.save(cert);
             log.info("인증서 생성 완료: {}", cert.getCertNumber());
 
-            // 6. 임시 파일 정리
+            // 7. 임시 파일 정리
             Files.deleteIfExists(tempPdf);
 
             return toResponse(cert);

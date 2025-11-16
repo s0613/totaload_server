@@ -296,4 +296,149 @@ public class Gemini {
         if (s.length() <= max) return s;
         return s.substring(0, max) + "...(truncated)";
     }
+
+    /**
+     * 인증서 이미지 분석 - 구조화된 JSON 반환
+     * PDF에서 변환된 이미지들을 분석하여 차량 정보를 추출합니다.
+     *
+     * @param imageUrls 분석할 이미지 URL 리스트
+     * @return 분석 결과 JsonNode (차량 정보 포함)
+     */
+    public JsonNode analyzeCertificate(List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            throw new IllegalArgumentException("이미지 URL 리스트가 비어있습니다.");
+        }
+
+        try {
+            // 1. 이미지 다운로드
+            List<byte[]> imageBytesList = downloadImages(imageUrls);
+
+            // 2. 요청 바디 생성 (분석용)
+            Map<String, Object> requestBody = createAnalysisRequestBody(imageBytesList);
+
+            // 3. Gemini API 호출
+            String response = webClient.post()
+                    .uri("/v1beta/models/" + model + ":generateContent?key=" + apiKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .timeout(Duration.ofSeconds(120))  // 분석은 더 오래 걸릴 수 있음
+                    .block();
+
+            // 4. 응답 파싱
+            return parseAnalysisResponse(response);
+
+        } catch (WebClientResponseException e) {
+            String body = e.getResponseBodyAsString();
+            throw new RuntimeException("Gemini API 호출 실패: HTTP " + e.getStatusCode().value() + " - " + safeBody(body), e);
+        } catch (Exception e) {
+            throw new RuntimeException("인증서 분석 중 오류: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 인증서 분석용 요청 바디 생성
+     */
+    private Map<String, Object> createAnalysisRequestBody(List<byte[]> images) {
+        Map<String, Object> body = new HashMap<>();
+        List<Map<String, Object>> contents = new ArrayList<>();
+
+        Map<String, Object> userMsg = new HashMap<>();
+        List<Map<String, Object>> parts = new ArrayList<>();
+
+        // 이미지들을 parts에 추가
+        for (byte[] img : images) {
+            Map<String, Object> imagePart = new HashMap<>();
+            Map<String, Object> inlineData = new HashMap<>();
+            inlineData.put("mime_type", detectMime(img));
+            inlineData.put("data", Base64.getEncoder().encodeToString(img));
+            imagePart.put("inline_data", inlineData);
+            parts.add(imagePart);
+        }
+
+        // 분석 지시사항
+        Map<String, Object> instructionPart = new HashMap<>();
+        instructionPart.put("text",
+                "위 이미지는 차량 인증서입니다. 다음 정보를 추출하여 JSON으로 반환하세요:\n" +
+                        "{\n" +
+                        "  \"manufacturer\": \"제조사\",\n" +
+                        "  \"modelName\": \"모델명\",\n" +
+                        "  \"vin\": \"차대번호 (17자리)\",\n" +
+                        "  \"manuYear\": \"제조연도 (숫자)\",\n" +
+                        "  \"displacement\": \"배기량 (cc 단위 문자열)\",\n" +
+                        "  \"fuelType\": \"연료 타입\",\n" +
+                        "  \"seatCount\": \"좌석 수 (숫자)\",\n" +
+                        "  \"variant\": \"트림/파생형\",\n" +
+                        "  \"inspectCountry\": \"검사 국가\",\n" +
+                        "  \"inspectDate\": \"검사일자 (YYYY-MM-DD)\",\n" +
+                        "  \"mileage\": \"주행거리 (숫자, km)\",\n" +
+                        "  \"colorCode\": \"외장색상\",\n" +
+                        "  \"engineNumber\": \"엔진번호\",\n" +
+                        "  \"confidence\": \"분석 신뢰도 (0.0-100.0)\"\n" +
+                        "}\n" +
+                        "정보가 없으면 null로 표기하세요. JSON만 반환하고 다른 설명은 포함하지 마세요.");
+        parts.add(instructionPart);
+
+        userMsg.put("role", "user");
+        userMsg.put("parts", parts);
+        contents.add(userMsg);
+
+        // JSON 응답 모드 설정
+        Map<String, Object> genCfg = new HashMap<>();
+        genCfg.put("response_mime_type", "application/json");
+
+        body.put("contents", contents);
+        body.put("generationConfig", genCfg);
+
+        return body;
+    }
+
+    /**
+     * 분석 응답 파싱
+     */
+    private JsonNode parseAnalysisResponse(String response) {
+        if (response == null || response.isBlank()) {
+            throw new IllegalStateException("빈 응답을 수신했습니다.");
+        }
+
+        try {
+            JsonNode root = objectMapper.readTree(response);
+
+            // 안전성 정책 체크
+            JsonNode promptFeedback = root.path("promptFeedback");
+            if (!promptFeedback.isMissingNode()) {
+                JsonNode blockReason = promptFeedback.path("blockReason");
+                if (!blockReason.isMissingNode() && !blockReason.asText().isBlank()) {
+                    throw new IllegalStateException("요청이 안전성 정책에 의해 차단되었습니다: " + blockReason.asText());
+                }
+            }
+
+            // candidates 추출
+            JsonNode candidates = root.path("candidates");
+            if (!candidates.isArray() || candidates.isEmpty()) {
+                throw new IllegalStateException("응답에 candidates가 없습니다.");
+            }
+
+            JsonNode first = candidates.get(0);
+            JsonNode content = first.path("content");
+            JsonNode parts = content.path("parts");
+            if (!parts.isArray() || parts.isEmpty()) {
+                throw new IllegalStateException("응답에 parts가 없습니다.");
+            }
+
+            JsonNode textNode = parts.get(0).path("text");
+            if (textNode.isMissingNode() || textNode.asText().isBlank()) {
+                throw new IllegalStateException("응답 텍스트를 찾을 수 없습니다.");
+            }
+
+            String jsonText = textNode.asText().trim();
+
+            // JSON 파싱
+            return objectMapper.readTree(jsonText);
+
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("응답 JSON 파싱 실패: " + e.getOriginalMessage() + " / raw=" + abbreviate(response, 800), e);
+        }
+    }
 }
