@@ -1,9 +1,9 @@
 spring:
   datasource:
-    url: jdbc:mariadb://localhost:3306/iso_db
-    username: isodb
-    password: isodb1234
-    driver-class-name: org.mariadb.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/iso_db?useSSL=false&serverTimezone=Asia/Seoul
+    username: ${DB_USERNAME:isodb}
+    password: ${DB_PASSWORD:isodb1234}
+    driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
     hibernate:
@@ -11,7 +11,7 @@ spring:
     show-sql: true
     properties§:
       hibernate:
-        dialect: org.hibernate.dialect.MariaDBDialect
+        dialect: org.hibernate.dialect.MySQLDialect
         format_sql: true
         use_sql_comments: true
         enable_lazy_load_no_trans: true

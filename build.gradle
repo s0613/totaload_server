@@ -22,23 +22,23 @@ configurations {
 repositories {
     mavenCentral()
 }
-
 dependencies {
     implementation 'io.awspring.cloud:spring-cloud-aws-starter-s3:3.1.1'
-
 
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-webflux'
-    implementation 'org.apache.pdfbox:pdfbox:2.0.30'
-    implementation 'org.apache.pdfbox:fontbox:2.0.30'
 
+    implementation 'org.apache.pdfbox:pdfbox:3.0.5'
+    // 혼용 금지: 아래 라인은 제거
+    // implementation 'org.apache.pdfbox:fontbox:2.0.30'
 
     compileOnly 'org.projectlombok:lombok'
-    runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
     annotationProcessor 'org.projectlombok:lombok'
+
+    runtimeOnly 'com.mysql:mysql-connector-j:8.3.0'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
