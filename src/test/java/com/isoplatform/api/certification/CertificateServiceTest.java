@@ -10,7 +10,6 @@ import com.isoplatform.api.certification.service.CertificateService;
 import com.isoplatform.api.util.Gemini;
 import com.isoplatform.api.util.PDFParser;
 import com.isoplatform.api.util.PdfImageConverter;
-import com.isoplatform.api.util.S3Service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,9 +46,6 @@ public class CertificateServiceTest {
     private EntityManager entityManager;
 
     @MockBean
-    private S3Service s3Service;
-
-    @MockBean
     private Gemini gemini;
 
     @MockBean
@@ -77,13 +73,6 @@ public class CertificateServiceTest {
         // PDFParser 모킹 - PDF 생성 시뮬레이션
         when(pdfParser.createCertificatePdf(any()))
                 .thenReturn("/tmp/test-certificate.pdf");
-
-        // S3Service 모킹 - S3 업로드 시뮬레이션
-        when(s3Service.uploadFile(anyString(), anyString()))
-                .thenReturn(com.isoplatform.api.util.S3UploadResult.builder()
-                        .s3Key("certificates/test.pdf")
-                        .cloudFrontUrl("https://test.cloudfront.net/certificates/test.pdf")
-                        .build());
 
         // SecurityContext 설정
         UsernamePasswordAuthenticationToken authentication =
