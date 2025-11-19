@@ -8,7 +8,10 @@ import com.isoplatform.api.certification.Certificate;
 import com.isoplatform.api.certification.repository.CertificateRepository;
 import com.isoplatform.api.certification.request.CertificateRequest;
 import com.isoplatform.api.certification.response.CertificateResponse;
+import com.isoplatform.api.inspection.VehicleChecklist;
+import com.isoplatform.api.inspection.service.ChecklistService;
 import com.isoplatform.api.util.*;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
@@ -22,10 +25,13 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -34,13 +40,20 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class CertificateService {
 
-    private final S3Service s3Service;
+    // private final S3Service s3Service; // Removed
     private final CertificateRepository certificateRepository;
     private final PDFParser pdfParser;
     private final Gemini gemini;
     private final UserRepository userRepository;
     private final PdfImageConverter pdfImageConverter;
+    private final ChecklistService checklistService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Value("${app.storage.path:./storage/certificates/}")
+    private String storagePath;
+
+    @Value("${app.storage.url-prefix:/storage/certificates/}")
+    private String storageUrlPrefix;
 
     @Transactional
     public CertificateResponse issueCertificate(CertificateRequest req, String issuedBy) {
@@ -60,14 +73,27 @@ public class CertificateService {
             // PDF 생성
             String localPdf = pdfParser.createCertificatePdf(cert);
 
-            // 업로드
-            String s3Key = "certificates/" + cert.getCertNumber() + ".pdf";
-            S3UploadResult up = s3Service.uploadFile(localPdf, s3Key);
-            cert.setPdfS3Key(up.getS3Key());
-            cert.setPdfUrl(up.getCloudFrontUrl());
+            // 업로드 -> 로컬 저장
+            String fileName = cert.getCertNumber() + ".pdf";
+            File destFile = new File(storagePath, fileName);
+            destFile.getParentFile().mkdirs();
+            
+            // PDFParser가 생성한 파일을 이동 또는 복사
+            File sourceFile = new File(localPdf);
+            if (sourceFile.renameTo(destFile)) {
+                log.info("PDF moved to storage: {}", destFile.getAbsolutePath());
+            } else {
+                // rename 실패 시 복사 후 삭제 시도 (다른 파티션 등)
+                Files.copy(sourceFile.toPath(), destFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                sourceFile.delete();
+                log.info("PDF copied to storage: {}", destFile.getAbsolutePath());
+            }
 
-            // 로컬 파일 제거
-            s3Service.deleteLocalFile(localPdf);
+            // cert.setPdfS3Key(up.getS3Key()); // Removed
+            cert.setPdfUrl(storageUrlPrefix + fileName);
+
+            // 로컬 파일 제거 (이미 이동/복사했으므로 sourceFile은 처리됨)
+            // s3Service.deleteLocalFile(localPdf);
 
             // 최종 저장
             certificateRepository.save(cert);
@@ -279,9 +305,19 @@ public class CertificateService {
             imagePaths = pdfImageConverter.convertPdfToImages(tempPdf.toString());
             log.info("PDF 이미지 변환 완료: {} 페이지", imagePaths.size());
 
-            // 3. S3에 이미지 업로드하여 URL 생성
-            List<String> imageUrls = s3Service.uploadImages(imagePaths);
-            log.info("이미지 S3 업로드 완료: {} 개", imageUrls.size());
+            // 3. S3에 이미지 업로드하여 URL 생성 -> Data URI로 변환
+            // List<String> imageUrls = s3Service.uploadImages(imagePaths);
+            List<String> imageUrls = new ArrayList<>();
+            for (String path : imagePaths) {
+                byte[] bytes = Files.readAllBytes(Paths.get(path));
+                String base64 = java.util.Base64.getEncoder().encodeToString(bytes);
+                // MIME type detection simplified for example (assuming jpg/png from converter)
+                String mimeType = "image/jpeg"; 
+                if (path.toLowerCase().endsWith(".png")) mimeType = "image/png";
+                
+                imageUrls.add("data:" + mimeType + ";base64," + base64);
+            }
+            log.info("이미지 Data URI 변환 완료: {} 개", imageUrls.size());
 
             // 4. Gemini AI 분석
             JsonNode aiAnalysis = gemini.analyzeCertificate(imageUrls);
@@ -394,15 +430,26 @@ public class CertificateService {
             // 3. PDF 생성
             String localPdf = pdfParser.createCertificatePdf(cert);
 
-            // 4. S3 업로드
-            String s3Key = "certificates/" + cert.getCertNumber() + ".pdf";
-            S3UploadResult uploadResult = s3Service.uploadFile(localPdf, s3Key);
-            cert.setPdfS3Key(uploadResult.getS3Key());
-            cert.setPdfUrl(uploadResult.getCloudFrontUrl());
-            cert.setS3Bucket("iso-platform-certificates"); // TODO: 환경변수로 관리
+            // 4. S3 업로드 -> 로컬 저장
+            String fileName = cert.getCertNumber() + ".pdf";
+            File destFile = new File(storagePath, fileName);
+            destFile.getParentFile().mkdirs();
 
-            // 5. 로컬 PDF 파일 삭제
-            s3Service.deleteLocalFile(localPdf);
+            File sourceFile = new File(localPdf);
+            if (sourceFile.renameTo(destFile)) {
+                 log.info("PDF moved to storage: {}", destFile.getAbsolutePath());
+            } else {
+                 Files.copy(sourceFile.toPath(), destFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                 sourceFile.delete();
+                 log.info("PDF copied to storage: {}", destFile.getAbsolutePath());
+            }
+
+            // cert.setPdfS3Key(uploadResult.getS3Key()); // Removed
+            cert.setPdfUrl(storageUrlPrefix + fileName);
+            // cert.setS3Bucket("iso-platform-certificates"); // Removed
+
+            // 5. 로컬 PDF 파일 삭제 (이미 처리됨)
+            // s3Service.deleteLocalFile(localPdf);
 
             // 6. DB 저장
             certificateRepository.save(cert);
@@ -532,6 +579,164 @@ public class CertificateService {
         } catch (Exception e) {
             log.error("getCertificatesByIssuer error", e);
             throw new RuntimeException("발급자별 인증서 조회 실패: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Create certificate from existing checklist
+     * 1. Retrieve checklist by ID
+     * 2. Extract vehicle info from checklist
+     * 3. Create CertificateRequest from checklist data
+     * 4. Generate certificate PDF
+     *
+     * @param checklistId ID of the checklist
+     * @param issuedBy Who is issuing the certificate
+     * @return Certificate response with PDF URL
+     */
+    @Transactional
+    public CertificateResponse createCertificateFromChecklist(Long checklistId, String issuedBy) {
+        try {
+            // 1. Get checklist
+            VehicleChecklist checklist = checklistService.getChecklistById(checklistId);
+            log.info("체크리스트로부터 인증서 생성 - 체크리스트 ID: {}, VIN: {}", checklistId, checklist.getVin());
+
+            // 2. Check if certificate already exists for this VIN
+            Certificate existing = certificateRepository.findByVin(checklist.getVin()).orElse(null);
+            if (existing != null) {
+                log.info("VIN 중복: 기존 인증서 반환 - {}", existing.getCertNumber());
+                return toResponse(existing);
+            }
+
+            // 3. Parse vehicle info JSON
+            Map<String, Object> vehicleInfo;
+            try {
+                vehicleInfo = objectMapper.readValue(
+                    checklist.getVehicleInfoJson(),
+                    objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class)
+                );
+            } catch (Exception e) {
+                log.error("차량 정보 JSON 파싱 실패", e);
+                throw new RuntimeException("차량 정보 파싱 실패: " + e.getMessage());
+            }
+
+            // 4. Extract values from vehicle info with safe type conversion
+            String manufacturer = getStringValue(vehicleInfo, "manufacturer");
+            String modelName = getStringValue(vehicleInfo, "model");
+            Integer manuYear = getIntegerValue(vehicleInfo, "year");
+            String fuelType = getStringValue(vehicleInfo, "fuelType");
+            Integer seatCount = getIntegerValue(vehicleInfo, "seatCount");
+            String displacement = getStringValue(vehicleInfo, "displacement");
+            String variant = getStringValue(vehicleInfo, "variant");
+
+            // 5. Create Certificate entity
+            String certNumber = genCert();
+            LocalDate now = LocalDate.now();
+
+            Certificate cert = Certificate.builder()
+                    .certNumber(certNumber)
+                    .issueDate(now)
+                    .expireDate(now.plusYears(1))
+                    .issuedBy(issuedBy)
+                    .inspectDate(now)
+                    .inspectCountry("KR") // Default to Korea
+                    .manufacturer(manufacturer)
+                    .modelName(modelName)
+                    .vin(checklist.getVin())
+                    .manuYear(manuYear)
+                    .manufactureYear(manuYear)
+                    .fuelType(fuelType)
+                    .seatCount(seatCount)
+                    .displacement(displacement)
+                    .variant(variant)
+                    .jaaiGrade(calculateGrade(checklist.getTotalScore(), checklist.getMaxTotalScore()))
+                    .aisScore(String.valueOf(checklist.getTotalScore()))
+                    .comment(String.format("체크리스트 평가 점수: %d/%d (%s)",
+                            checklist.getTotalScore(),
+                            checklist.getMaxTotalScore(),
+                            checklist.getStatus()))
+                    .build();
+
+            log.info("PDF 생성 직전 - VIN: {}, manufacturer: {}, modelName: {}",
+                    cert.getVin(), cert.getManufacturer(), cert.getModelName());
+
+            // 6. Generate PDF
+            String localPdf = pdfParser.createCertificatePdf(cert);
+
+            // 7. Save PDF to storage
+            String fileName = cert.getCertNumber() + ".pdf";
+            File destFile = new File(storagePath, fileName);
+            destFile.getParentFile().mkdirs();
+
+            File sourceFile = new File(localPdf);
+            if (sourceFile.renameTo(destFile)) {
+                log.info("PDF moved to storage: {}", destFile.getAbsolutePath());
+            } else {
+                Files.copy(sourceFile.toPath(), destFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                sourceFile.delete();
+                log.info("PDF copied to storage: {}", destFile.getAbsolutePath());
+            }
+
+            cert.setPdfUrl(storageUrlPrefix + fileName);
+
+            // 8. Save certificate
+            certificateRepository.save(cert);
+            log.info("체크리스트로부터 인증서 생성 완료 - 인증서 번호: {}, VIN: {}", cert.getCertNumber(), cert.getVin());
+
+            return toResponse(cert);
+
+        } catch (IllegalArgumentException e) {
+            log.warn("체크리스트 조회 실패: {}", e.getMessage());
+            throw e;
+        } catch (Exception e) {
+            log.error("체크리스트로부터 인증서 생성 실패", e);
+            throw new RuntimeException("인증서 생성 실패: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Calculate grade based on score percentage
+     */
+    private String calculateGrade(Integer totalScore, Integer maxTotalScore) {
+        if (totalScore == null || maxTotalScore == null || maxTotalScore == 0) {
+            return "N/A";
+        }
+
+        double percentage = (totalScore.doubleValue() / maxTotalScore.doubleValue()) * 100;
+
+        if (percentage >= 90) return "S";
+        if (percentage >= 80) return "A";
+        if (percentage >= 70) return "B";
+        if (percentage >= 60) return "C";
+        if (percentage >= 50) return "D";
+        return "F";
+    }
+
+    /**
+     * Safe extraction of String value from Map
+     */
+    private String getStringValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        return value != null ? value.toString() : null;
+    }
+
+    /**
+     * Safe extraction of Integer value from Map
+     */
+    private Integer getIntegerValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        if (value == null) return null;
+
+        if (value instanceof Integer) {
+            return (Integer) value;
+        } else if (value instanceof Number) {
+            return ((Number) value).intValue();
+        } else {
+            try {
+                return Integer.parseInt(value.toString());
+            } catch (NumberFormatException e) {
+                log.warn("Failed to parse integer value for key {}: {}", key, value);
+                return null;
+            }
         }
     }
 }

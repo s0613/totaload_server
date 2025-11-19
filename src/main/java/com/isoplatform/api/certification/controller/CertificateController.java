@@ -276,6 +276,42 @@ public class CertificateController {
     }
 
     /**
+     * Create certificate from checklist
+     * POST /api/certificates/from-checklist?checklistId={id}
+     */
+    @PostMapping("/from-checklist")
+    public ResponseEntity<?> createCertificateFromChecklist(
+            @RequestParam("checklistId") Long checklistId,
+            @RequestHeader("X-API-KEY") String apiKey) {
+
+        log.info("체크리스트로부터 인증서 생성 요청 - 체크리스트 ID: {}", checklistId);
+
+        // API 키 검증
+        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
+        if (!validationResult.isValid()) {
+            log.warn("인증서 생성 실패 - 인증 실패: {}", validationResult.getMessage());
+            return ResponseEntity.status(401).body("Unauthorized: " + validationResult.getMessage());
+        }
+
+        try {
+            CertificateResponse response = certificateService.createCertificateFromChecklist(
+                    checklistId,
+                    "TOTALOAD_SYSTEM"
+            );
+            log.info("체크리스트로부터 인증서 생성 완료 - 인증서 번호: {}, VIN: {}",
+                    response.getCertNumber(), response.getVin());
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            log.warn("체크리스트 조회 실패: {}", e.getMessage());
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("인증서 생성 실패", e);
+            return ResponseEntity.internalServerError()
+                    .body("인증서 생성 실패: " + e.getMessage());
+        }
+    }
+
+    /**
      * 예외 처리
      */
     @ExceptionHandler(IllegalArgumentException.class)
