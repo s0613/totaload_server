@@ -1,23 +1,19 @@
 package com.isoplatform.api.config;
 
-
+import com.isoplatform.api.auth.handler.OAuth2AuthenticationFailureHandler;
+import com.isoplatform.api.auth.handler.OAuth2AuthenticationSuccessHandler;
+import com.isoplatform.api.auth.service.CustomOAuth2UserService;
 import com.isoplatform.api.config.handler.Http401Handler;
 import com.isoplatform.api.config.handler.Http403Handler;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.Environment;
-
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-
 import org.springframework.security.web.SecurityFilterChain;
-
 
 @Slf4j
 @Configuration
@@ -27,6 +23,9 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     private final ObjectMapper objectMapper;
+    private final CustomOAuth2UserService customOAuth2UserService;
+    private final OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler;
+    private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
 
 
     @Bean
@@ -37,6 +36,8 @@ public class SecurityConfig {
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(
                                 "/api/health",
+                                "/login/oauth2/**",
+                                "/oauth2/**",
                                 // Swagger UI와 API Docs 접근 허용
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
@@ -46,9 +47,18 @@ public class SecurityConfig {
                                 "/api/photos/**",
                                 "/api/checklists/**",
                                 "/api/certificates/from-checklist"
-                                )
+                        )
                         .permitAll()
                         .anyRequest().authenticated())
+
+                // OAuth2 로그인 설정
+                .oauth2Login(oauth2 -> oauth2
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .userService(customOAuth2UserService))
+                        .successHandler(oAuth2AuthenticationSuccessHandler)
+                        .failureHandler(oAuth2AuthenticationFailureHandler)
+                )
+
                 // 예외 처리
                 .exceptionHandling(exception -> {
                     exception.accessDeniedHandler(new Http403Handler(objectMapper));
