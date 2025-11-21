@@ -1,9 +1,14 @@
 package com.isoplatform.api.auth.controller;
 
 import com.isoplatform.api.auth.dto.AuthResponse;
+import com.isoplatform.api.auth.dto.ErrorResponse;
 import com.isoplatform.api.auth.dto.LoginRequest;
 import com.isoplatform.api.auth.dto.RefreshTokenRequest;
 import com.isoplatform.api.auth.dto.SignupRequest;
+import com.isoplatform.api.auth.exception.EmailAlreadyExistsException;
+import com.isoplatform.api.auth.exception.InvalidCredentialsException;
+import com.isoplatform.api.auth.exception.InvalidRefreshTokenException;
+import com.isoplatform.api.auth.exception.OAuth2UserCannotLoginLocallyException;
 import com.isoplatform.api.auth.service.LocalAuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -28,14 +33,9 @@ public class AuthController {
      */
     @PostMapping("/signup")
     public ResponseEntity<AuthResponse> signup(@Valid @RequestBody SignupRequest request) {
-        try {
-            log.info("Signup request for email: {}", request.getEmail());
-            AuthResponse response = localAuthService.signup(request);
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-        } catch (RuntimeException e) {
-            log.error("Signup failed: {}", e.getMessage());
-            return ResponseEntity.badRequest().build();
-        }
+        log.info("Signup request for email: {}", request.getEmail());
+        AuthResponse response = localAuthService.signup(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     /**
@@ -46,14 +46,9 @@ public class AuthController {
      */
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        try {
-            log.info("Login request for email: {}", request.getEmail());
-            AuthResponse response = localAuthService.login(request);
-            return ResponseEntity.ok(response);
-        } catch (RuntimeException e) {
-            log.error("Login failed: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
+        log.info("Login request for email: {}", request.getEmail());
+        AuthResponse response = localAuthService.login(request);
+        return ResponseEntity.ok(response);
     }
 
     /**
@@ -64,31 +59,73 @@ public class AuthController {
      */
     @PostMapping("/refresh")
     public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
-        try {
-            log.info("Token refresh request");
-            AuthResponse response = localAuthService.refreshAccessToken(request.getRefreshToken());
-            return ResponseEntity.ok(response);
-        } catch (RuntimeException e) {
-            log.error("Token refresh failed: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
+        log.info("Token refresh request");
+        AuthResponse response = localAuthService.refreshAccessToken(request.getRefreshToken());
+        return ResponseEntity.ok(response);
     }
 
     /**
      * Logout by revoking refresh token
      *
      * @param request refresh token request
-     * @return 204 No Content on successful logout
+     * @return 200 OK on successful logout
      */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request) {
-        try {
-            log.info("Logout request");
-            localAuthService.logout(request.getRefreshToken());
-            return ResponseEntity.noContent().build();
-        } catch (RuntimeException e) {
-            log.error("Logout failed: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
+        log.info("Logout request");
+        localAuthService.logout(request.getRefreshToken());
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Handle EmailAlreadyExistsException
+     *
+     * @param e the exception
+     * @return 409 Conflict with error response
+     */
+    @ExceptionHandler(EmailAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleEmailExists(EmailAlreadyExistsException e) {
+        log.error("Email already exists: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("EMAIL_EXISTS", e.getMessage()));
+    }
+
+    /**
+     * Handle InvalidCredentialsException
+     *
+     * @param e the exception
+     * @return 401 Unauthorized with error response
+     */
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException e) {
+        log.error("Invalid credentials: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new ErrorResponse("INVALID_CREDENTIALS", e.getMessage()));
+    }
+
+    /**
+     * Handle OAuth2UserCannotLoginLocallyException
+     *
+     * @param e the exception
+     * @return 400 Bad Request with error response
+     */
+    @ExceptionHandler(OAuth2UserCannotLoginLocallyException.class)
+    public ResponseEntity<ErrorResponse> handleOAuth2User(OAuth2UserCannotLoginLocallyException e) {
+        log.error("OAuth2 user attempted local login: {}", e.getMessage());
+        return ResponseEntity.badRequest()
+                .body(new ErrorResponse("OAUTH2_USER", e.getMessage()));
+    }
+
+    /**
+     * Handle InvalidRefreshTokenException
+     *
+     * @param e the exception
+     * @return 401 Unauthorized with error response
+     */
+    @ExceptionHandler(InvalidRefreshTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidRefreshToken(InvalidRefreshTokenException e) {
+        log.error("Invalid refresh token: {}", e.getMessage());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(new ErrorResponse("INVALID_TOKEN", e.getMessage()));
     }
 }

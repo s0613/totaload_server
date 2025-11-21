@@ -1,9 +1,12 @@
 package com.isoplatform.api.auth.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.isoplatform.api.auth.Role;
+import com.isoplatform.api.auth.User;
 import com.isoplatform.api.auth.dto.LoginRequest;
 import com.isoplatform.api.auth.dto.RefreshTokenRequest;
 import com.isoplatform.api.auth.dto.SignupRequest;
+import com.isoplatform.api.auth.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -31,6 +34,9 @@ class AuthControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserRepository userRepository;
+
     @Test
     void signup_shouldReturn201WithTokens() throws Exception {
         SignupRequest request = new SignupRequest();
@@ -49,7 +55,7 @@ class AuthControllerTest {
     }
 
     @Test
-    void signup_shouldReturn400WhenEmailExists() throws Exception {
+    void signup_shouldReturn409WhenEmailExists() throws Exception {
         // First signup
         SignupRequest request1 = new SignupRequest();
         request1.setEmail("duplicate@example.com");
@@ -69,7 +75,10 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/auth/signup")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request2)))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("EMAIL_EXISTS"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 
     @Test
@@ -131,21 +140,36 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(loginRequest)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("INVALID_CREDENTIALS"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 
     @Test
     void login_shouldReturn400WhenOAuth2User() throws Exception {
-        // This test will verify that OAuth2 users cannot login locally
-        // For now, we'll test the general case - implementation will add specific OAuth2 check
+        // Create OAuth2 user
+        User oauth2User = User.builder()
+                .email("oauth2@example.com")
+                .name("OAuth2 User")
+                .provider("GOOGLE")
+                .role(Role.USER)
+                .password("") // OAuth2 users don't have passwords
+                .build();
+        userRepository.save(oauth2User);
+
+        // Attempt local login
         LoginRequest loginRequest = new LoginRequest();
-        loginRequest.setEmail("nonexistent@example.com");
+        loginRequest.setEmail("oauth2@example.com");
         loginRequest.setPassword("Password123!");
 
         mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(loginRequest)))
-                .andExpect(status().isUnauthorized()); // Will return 401 for non-existent user
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("OAUTH2_USER"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 
     @Test
@@ -186,11 +210,14 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("INVALID_TOKEN"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 
     @Test
-    void logout_shouldReturn204() throws Exception {
+    void logout_shouldReturn200() throws Exception {
         // First, register and get tokens
         SignupRequest signupRequest = new SignupRequest();
         signupRequest.setEmail("logout-test@example.com");
@@ -213,13 +240,16 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/auth/logout")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(logoutRequest)))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isOk());
 
         // Verify token is revoked by trying to refresh
         mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(logoutRequest)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("INVALID_TOKEN"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 
     @Test
@@ -230,6 +260,9 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/auth/logout")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("INVALID_TOKEN"))
+                .andExpect(jsonPath("$.message").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 }
