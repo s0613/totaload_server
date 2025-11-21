@@ -1,5 +1,6 @@
 package com.isoplatform.api.config;
 
+import com.isoplatform.api.auth.filter.JwtAuthenticationFilter;
 import com.isoplatform.api.auth.handler.OAuth2AuthenticationFailureHandler;
 import com.isoplatform.api.auth.handler.OAuth2AuthenticationSuccessHandler;
 import com.isoplatform.api.auth.service.CustomOAuth2UserService;
@@ -13,7 +14,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Slf4j
 @Configuration
@@ -26,47 +31,53 @@ public class SecurityConfig {
     private final CustomOAuth2UserService customOAuth2UserService;
     private final OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler;
     private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // 접근 권한
-                .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers(
-                                "/api/health",
-                                "/login/oauth2/**",
-                                "/oauth2/**",
-                                // Swagger UI와 API Docs 접근 허용
-                                "/swagger-ui/**",
-                                "/v3/api-docs/**",
-                                "/swagger-resources/**",
-                                "/swagger-ui.html",
-                                "/api/certificates/issue",
-                                "/api/photos/**",
-                                "/api/checklists/**",
-                                "/api/certificates/from-checklist"
-                        )
-                        .permitAll()
-                        .anyRequest().authenticated())
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session ->
+                    session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        // Public endpoints
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
 
-                // OAuth2 로그인 설정
+                        // Auth endpoints (public)
+                        .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/login/oauth2/**").permitAll()
+                        .requestMatchers("/oauth2/**").permitAll()
+
+                        // Legacy public API endpoints (backward compatibility)
+                        .requestMatchers("/api/certificates/issue").permitAll()
+                        .requestMatchers("/api/photos/**").permitAll()
+                        .requestMatchers("/api/checklists/**").permitAll()
+                        .requestMatchers("/api/certificates/from-checklist").permitAll()
+
+                        // Protected API endpoints
+                        .requestMatchers("/api/**").authenticated()
+
+                        .anyRequest().authenticated()
+                )
                 .oauth2Login(oauth2 -> oauth2
                         .userInfoEndpoint(userInfo -> userInfo
                                 .userService(customOAuth2UserService))
                         .successHandler(oAuth2AuthenticationSuccessHandler)
                         .failureHandler(oAuth2AuthenticationFailureHandler)
                 )
-
-                // 예외 처리
                 .exceptionHandling(exception -> {
                     exception.accessDeniedHandler(new Http403Handler(objectMapper));
                     exception.authenticationEntryPoint(new Http401Handler(objectMapper));
                 })
-
-                .csrf(csrf -> csrf.disable());
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
     }
 }
