@@ -3,6 +3,7 @@ package com.isoplatform.api.auth.service;
 import com.isoplatform.api.auth.RefreshToken;
 import com.isoplatform.api.auth.Role;
 import com.isoplatform.api.auth.User;
+import com.isoplatform.api.auth.exception.InvalidRefreshTokenException;
 import com.isoplatform.api.auth.repository.RefreshTokenRepository;
 import com.isoplatform.api.auth.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,6 +61,7 @@ class RefreshTokenServiceTest {
     void shouldVerifyValidToken() {
         // Given
         RefreshToken token = refreshTokenService.createRefreshToken(testUser);
+        LocalDateTime createdAt = token.getCreatedAt();
 
         // When
         RefreshToken verified = refreshTokenService.verifyRefreshToken(token.getToken());
@@ -67,6 +69,8 @@ class RefreshTokenServiceTest {
         // Then
         assertNotNull(verified);
         assertEquals(token.getToken(), verified.getToken());
+        assertNotNull(verified.getLastUsedAt());
+        assertTrue(verified.getLastUsedAt().isAfter(createdAt));
     }
 
     @Test
@@ -80,7 +84,7 @@ class RefreshTokenServiceTest {
         refreshTokenRepository.save(expiredToken);
 
         // When & Then
-        assertThrows(RuntimeException.class, () ->
+        assertThrows(InvalidRefreshTokenException.class, () ->
             refreshTokenService.verifyRefreshToken("expired-token-123"));
     }
 
@@ -96,7 +100,7 @@ class RefreshTokenServiceTest {
         refreshTokenRepository.save(revokedToken);
 
         // When & Then
-        assertThrows(RuntimeException.class, () ->
+        assertThrows(InvalidRefreshTokenException.class, () ->
             refreshTokenService.verifyRefreshToken("revoked-token-123"));
     }
 
@@ -135,5 +139,19 @@ class RefreshTokenServiceTest {
         // Then
         assertTrue(deleted > 0);
         assertFalse(refreshTokenRepository.findByToken("to-be-deleted").isPresent());
+    }
+
+    @Test
+    void shouldThrowExceptionForNonExistentToken() {
+        // When & Then
+        assertThrows(InvalidRefreshTokenException.class, () ->
+            refreshTokenService.verifyRefreshToken("non-existent-token-123"));
+    }
+
+    @Test
+    void shouldThrowExceptionForNonExistentTokenOnRevoke() {
+        // When & Then
+        assertThrows(InvalidRefreshTokenException.class, () ->
+            refreshTokenService.revokeToken("non-existent-token-456"));
     }
 }

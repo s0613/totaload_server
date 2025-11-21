@@ -2,6 +2,7 @@ package com.isoplatform.api.auth.service;
 
 import com.isoplatform.api.auth.RefreshToken;
 import com.isoplatform.api.auth.User;
+import com.isoplatform.api.auth.exception.InvalidRefreshTokenException;
 import com.isoplatform.api.auth.repository.RefreshTokenRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -42,15 +43,15 @@ public class RefreshTokenService {
     @Transactional
     public RefreshToken verifyRefreshToken(String token) {
         RefreshToken refreshToken = refreshTokenRepository.findByToken(token)
-                .orElseThrow(() -> new RuntimeException("Refresh token not found"));
+                .orElseThrow(() -> new InvalidRefreshTokenException("Invalid or expired refresh token"));
 
         if (refreshToken.isRevoked()) {
-            throw new RuntimeException("Refresh token has been revoked");
+            throw new InvalidRefreshTokenException("Invalid or expired refresh token");
         }
 
         if (refreshToken.isExpired()) {
             refreshTokenRepository.delete(refreshToken);
-            throw new RuntimeException("Refresh token has expired");
+            throw new InvalidRefreshTokenException("Invalid or expired refresh token");
         }
 
         // Update last used timestamp
@@ -63,7 +64,7 @@ public class RefreshTokenService {
     @Transactional
     public void revokeToken(String token) {
         RefreshToken refreshToken = refreshTokenRepository.findByToken(token)
-                .orElseThrow(() -> new RuntimeException("Refresh token not found"));
+                .orElseThrow(() -> new InvalidRefreshTokenException("Invalid or expired refresh token"));
 
         refreshToken.setRevoked(true);
         refreshTokenRepository.save(refreshToken);
