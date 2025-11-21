@@ -96,4 +96,24 @@ class AuthServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("이미 사용 중인 이메일입니다");
     }
+
+    @Test
+    void shouldFailSignupWhenUsernameExists() {
+        // Given
+        SignupRequest request = SignupRequest.builder()
+                .email("test@example.com")
+                .username("testuser")
+                .password("password123")
+                .confirmPassword("password123")
+                .name("Test User")
+                .build();
+
+        when(userRepository.existsByEmail(anyString())).thenReturn(false);
+        when(userRepository.existsByUsername(anyString())).thenReturn(true);
+
+        // When & Then
+        assertThatThrownBy(() -> authService.signup(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("이미 사용 중인 사용자명입니다");
+    }
 }
