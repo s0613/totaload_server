@@ -1,8 +1,10 @@
 package com.isoplatform.api.auth.handler;
 
+import com.isoplatform.api.auth.RefreshToken;
 import com.isoplatform.api.auth.User;
 import com.isoplatform.api.auth.repository.UserRepository;
 import com.isoplatform.api.auth.service.JwtTokenProvider;
+import com.isoplatform.api.auth.service.RefreshTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import java.io.IOException;
 public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationSuccessHandler {
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenService refreshTokenService;
     private final UserRepository userRepository;
 
     @Value("${frontend.url}")
@@ -36,18 +39,42 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
 
         log.info("OAuth2 authentication successful for: {}", email);
 
+        // Find user from database
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found after OAuth2 login"));
 
-        String token = jwtTokenProvider.generateToken(user);
+        // Generate JWT access token
+        String accessToken = jwtTokenProvider.generateToken(user);
 
-        String targetUrl = UriComponentsBuilder.fromUriString(frontendUrl + "/oauth2/redirect")
-                .queryParam("token", token)
-                .queryParam("email", user.getEmail())
-                .queryParam("name", user.getName())
-                .build().toUriString();
+        // Generate refresh token
+        RefreshToken refreshToken = refreshTokenService.createRefreshToken(user);
 
-        log.info("Redirecting to: {}", targetUrl);
+        // Get redirect URL from request parameter (for mobile deep links)
+        String redirectUrl = request.getParameter("redirectUrl");
+
+        String targetUrl;
+        if (redirectUrl != null && !redirectUrl.isEmpty()) {
+            // Mobile deep link with tokens
+            targetUrl = UriComponentsBuilder.fromUriString(redirectUrl)
+                    .queryParam("access_token", accessToken)
+                    .queryParam("refresh_token", refreshToken.getToken())
+                    .queryParam("token_type", "Bearer")
+                    .build()
+                    .toUriString();
+
+            log.info("OAuth2 login successful for user: {} - redirecting to mobile deep link", email);
+        } else {
+            // Web redirect (default) with tokens
+            targetUrl = UriComponentsBuilder.fromUriString(frontendUrl)
+                    .queryParam("access_token", accessToken)
+                    .queryParam("refresh_token", refreshToken.getToken())
+                    .queryParam("token_type", "Bearer")
+                    .build()
+                    .toUriString();
+
+            log.info("OAuth2 login successful for user: {} - redirecting to web URL", email);
+        }
+
         getRedirectStrategy().sendRedirect(request, response, targetUrl);
     }
 }
