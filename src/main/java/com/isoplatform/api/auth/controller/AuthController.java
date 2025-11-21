@@ -28,8 +28,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final AuthenticationManager authenticationManager;
-    private final SecurityContextRepository securityContextRepository =
-            new HttpSessionSecurityContextRepository();
+    private final SecurityContextRepository securityContextRepository;
 
     @PostMapping("/signup")
     public ResponseEntity<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
@@ -107,11 +106,18 @@ public class AuthController {
                     .success(true)
                     .message("로그아웃되었습니다")
                     .build());
-        } catch (Exception e) {
-            log.error("로그아웃 실패: {}", e.getMessage());
+        } catch (IllegalStateException e) {
+            // Session already invalidated - this is fine
+            log.debug("로그아웃 시 세션 이미 무효화됨: {}", e.getMessage());
             return ResponseEntity.ok(LogoutResponse.builder()
                     .success(true)
                     .message("로그아웃되었습니다")
+                    .build());
+        } catch (Exception e) {
+            log.error("로그아웃 실패: {}", e.getMessage(), e);
+            return ResponseEntity.status(500).body(LogoutResponse.builder()
+                    .success(false)
+                    .message("로그아웃 처리 중 오류가 발생했습니다")
                     .build());
         }
     }
