@@ -1,14 +1,9 @@
 package com.isoplatform.api.auth.controller;
 
 import com.isoplatform.api.auth.dto.AuthResponse;
-import com.isoplatform.api.auth.dto.ErrorResponse;
 import com.isoplatform.api.auth.dto.LoginRequest;
 import com.isoplatform.api.auth.dto.RefreshTokenRequest;
 import com.isoplatform.api.auth.dto.SignupRequest;
-import com.isoplatform.api.auth.exception.EmailAlreadyExistsException;
-import com.isoplatform.api.auth.exception.InvalidCredentialsException;
-import com.isoplatform.api.auth.exception.InvalidRefreshTokenException;
-import com.isoplatform.api.auth.exception.OAuth2UserCannotLoginLocallyException;
 import com.isoplatform.api.auth.service.LocalAuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -75,57 +70,5 @@ public class AuthController {
         log.info("Logout request");
         localAuthService.logout(request.getRefreshToken());
         return ResponseEntity.ok().build();
-    }
-
-    /**
-     * Handle EmailAlreadyExistsException
-     *
-     * @param e the exception
-     * @return 409 Conflict with error response
-     */
-    @ExceptionHandler(EmailAlreadyExistsException.class)
-    public ResponseEntity<ErrorResponse> handleEmailExists(EmailAlreadyExistsException e) {
-        log.error("Email already exists: {}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(new ErrorResponse("EMAIL_EXISTS", e.getMessage()));
-    }
-
-    /**
-     * Handle InvalidCredentialsException
-     *
-     * @param e the exception
-     * @return 401 Unauthorized with error response
-     */
-    @ExceptionHandler(InvalidCredentialsException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidCredentials(InvalidCredentialsException e) {
-        log.error("Invalid credentials: {}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(new ErrorResponse("INVALID_CREDENTIALS", e.getMessage()));
-    }
-
-    /**
-     * Handle OAuth2UserCannotLoginLocallyException
-     *
-     * @param e the exception
-     * @return 400 Bad Request with error response
-     */
-    @ExceptionHandler(OAuth2UserCannotLoginLocallyException.class)
-    public ResponseEntity<ErrorResponse> handleOAuth2User(OAuth2UserCannotLoginLocallyException e) {
-        log.error("OAuth2 user attempted local login: {}", e.getMessage());
-        return ResponseEntity.badRequest()
-                .body(new ErrorResponse("OAUTH2_USER", e.getMessage()));
-    }
-
-    /**
-     * Handle InvalidRefreshTokenException
-     *
-     * @param e the exception
-     * @return 401 Unauthorized with error response
-     */
-    @ExceptionHandler(InvalidRefreshTokenException.class)
-    public ResponseEntity<ErrorResponse> handleInvalidRefreshToken(InvalidRefreshTokenException e) {
-        log.error("Invalid refresh token: {}", e.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(new ErrorResponse("INVALID_TOKEN", e.getMessage()));
     }
 }
