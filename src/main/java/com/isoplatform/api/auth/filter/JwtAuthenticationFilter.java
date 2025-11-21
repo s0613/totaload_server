@@ -1,7 +1,5 @@
 package com.isoplatform.api.auth.filter;
 
-import com.isoplatform.api.auth.User;
-import com.isoplatform.api.auth.repository.UserRepository;
 import com.isoplatform.api.auth.service.JwtTokenProvider;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -26,7 +24,6 @@ import java.util.List;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
-    private final UserRepository userRepository;
 
     @Override
     protected void doFilterInternal(
@@ -37,29 +34,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String jwt = extractJwtFromRequest(request);
 
-            if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
-                String email = jwtTokenProvider.getEmailFromToken(jwt);
-                Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
-                String role = jwtTokenProvider.getRoleFromToken(jwt);
+            if (StringUtils.hasText(jwt)) {
+                if (jwtTokenProvider.validateToken(jwt)) {
+                    String email = jwtTokenProvider.getEmailFromToken(jwt);
+                    String role = jwtTokenProvider.getRoleFromToken(jwt);
 
-                // Load user from database
-                User user = userRepository.findById(userId)
-                        .orElseThrow(() -> new RuntimeException("User not found: " + userId));
+                    // Create authentication from JWT claims (stateless)
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(
+                                    email,
+                                    null,
+                                    List.of(new SimpleGrantedAuthority("ROLE_" + role))
+                            );
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                // Create authentication
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(
-                                email,
-                                null,
-                                List.of(new SimpleGrantedAuthority("ROLE_" + role))
-                        );
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
-                SecurityContextHolder.getContext().setAuthentication(authentication);
-                log.debug("JWT authentication successful for user: {}", email);
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                    log.debug("JWT authentication successful for user: {}", email);
+                } else {
+                    log.debug("JWT token validation failed");
+                }
             }
         } catch (Exception e) {
-            log.error("Cannot set user authentication: {}", e.getMessage());
+            log.error("Unexpected error during JWT authentication: {}", e.getMessage(), e);
         }
 
         filterChain.doFilter(request, response);
