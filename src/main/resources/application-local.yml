@@ -55,6 +55,11 @@ server:
 frontend:
   url: ${FRONTEND_URL:http://localhost:3000}
 
+# OAuth2 보안 설정
+auth:
+  allowed-redirect-domains:
+    - localhost:3000
+
 # Swagger 설정
 springdoc:
   version: 1.0.0

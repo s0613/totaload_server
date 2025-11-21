@@ -74,6 +74,10 @@ class OAuth2AuthenticationSuccessHandlerTest {
         // Inject frontend URL via reflection
         ReflectionTestUtils.setField(handler, "frontendUrl", "http://localhost:3000");
 
+        // Inject allowed redirect domains via reflection
+        ReflectionTestUtils.setField(handler, "allowedRedirectDomains",
+                java.util.Arrays.asList("localhost:3000"));
+
         // Set custom redirect strategy for testing
         handler.setRedirectStrategy(redirectStrategy);
 
@@ -135,7 +139,7 @@ class OAuth2AuthenticationSuccessHandlerTest {
         verify(redirectStrategy).sendRedirect(eq(request), eq(response), urlCaptor.capture());
 
         String redirectUrl = urlCaptor.getValue();
-        assertThat(redirectUrl).startsWith(mobileDeepLink);
+        assertThat(redirectUrl).startsWith(mobileDeepLink + "#");
         assertThat(redirectUrl).contains("access_token=jwt-access-token-123");
         assertThat(redirectUrl).contains("refresh_token=refresh-token-123");
         assertThat(redirectUrl).contains("token_type=Bearer");
@@ -160,7 +164,7 @@ class OAuth2AuthenticationSuccessHandlerTest {
         verify(redirectStrategy).sendRedirect(eq(request), eq(response), urlCaptor.capture());
 
         String redirectUrl = urlCaptor.getValue();
-        assertThat(redirectUrl).startsWith("http://localhost:3000");
+        assertThat(redirectUrl).startsWith("http://localhost:3000#");
         assertThat(redirectUrl).contains("access_token=jwt-access-token-123");
         assertThat(redirectUrl).contains("refresh_token=refresh-token-123");
         assertThat(redirectUrl).contains("token_type=Bearer");
@@ -202,7 +206,7 @@ class OAuth2AuthenticationSuccessHandlerTest {
         when(userRepository.findByEmail("nonexistent@example.com")).thenReturn(Optional.empty());
 
         // When/Then
-        assertThrows(RuntimeException.class, () -> {
+        assertThrows(IllegalStateException.class, () -> {
             handler.onAuthenticationSuccess(request, response, authentication);
         });
     }
@@ -226,7 +230,7 @@ class OAuth2AuthenticationSuccessHandlerTest {
         verify(redirectStrategy).sendRedirect(eq(request), eq(response), urlCaptor.capture());
 
         String redirectUrl = urlCaptor.getValue();
-        assertThat(redirectUrl).startsWith("http://localhost:3000");
+        assertThat(redirectUrl).startsWith("http://localhost:3000#");
     }
 
     @Test
@@ -271,9 +275,80 @@ class OAuth2AuthenticationSuccessHandlerTest {
         verify(redirectStrategy).sendRedirect(eq(request), eq(response), urlCaptor.capture());
 
         String redirectUrl = urlCaptor.getValue();
-        assertThat(redirectUrl).startsWith(customDeepLink);
+        assertThat(redirectUrl).startsWith(customDeepLink + "#");
         assertThat(redirectUrl).contains("access_token=jwt-access-token-123");
         assertThat(redirectUrl).contains("refresh_token=refresh-token-123");
+    }
+
+    @Test
+    void onAuthenticationSuccess_shouldRejectJavaScriptScheme() {
+        // Given
+        OAuth2User oAuth2User = createOAuth2User("test@example.com", "Test User");
+        Authentication authentication = createAuthentication(oAuth2User);
+
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+        when(jwtTokenProvider.generateToken(testUser)).thenReturn("jwt-access-token-123");
+        when(refreshTokenService.createRefreshToken(testUser)).thenReturn(testRefreshToken);
+        when(request.getParameter("redirectUrl")).thenReturn("javascript:alert('XSS')");
+
+        // When/Then
+        assertThrows(IllegalArgumentException.class, () ->
+                handler.onAuthenticationSuccess(request, response, authentication));
+    }
+
+    @Test
+    void onAuthenticationSuccess_shouldRejectExternalDomain() {
+        // Given
+        OAuth2User oAuth2User = createOAuth2User("test@example.com", "Test User");
+        Authentication authentication = createAuthentication(oAuth2User);
+
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+        when(jwtTokenProvider.generateToken(testUser)).thenReturn("jwt-access-token-123");
+        when(refreshTokenService.createRefreshToken(testUser)).thenReturn(testRefreshToken);
+        when(request.getParameter("redirectUrl")).thenReturn("https://evil.com/steal");
+
+        // When/Then
+        assertThrows(IllegalArgumentException.class, () ->
+                handler.onAuthenticationSuccess(request, response, authentication));
+    }
+
+    @Test
+    void onAuthenticationSuccess_shouldAcceptWhitelistedScheme() throws IOException {
+        // Given
+        OAuth2User oAuth2User = createOAuth2User("test@example.com", "Test User");
+        Authentication authentication = createAuthentication(oAuth2User);
+
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+        when(jwtTokenProvider.generateToken(testUser)).thenReturn("jwt-access-token-123");
+        when(refreshTokenService.createRefreshToken(testUser)).thenReturn(testRefreshToken);
+        when(request.getParameter("redirectUrl")).thenReturn("totaload://oauth2/callback");
+
+        // When
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        // Then
+        ArgumentCaptor<String> redirectCaptor = ArgumentCaptor.forClass(String.class);
+        verify(redirectStrategy).sendRedirect(any(), any(), redirectCaptor.capture());
+
+        String redirectUrl = redirectCaptor.getValue();
+        assertThat(redirectUrl).startsWith("totaload://oauth2/callback#"); // Fragment, not query
+        assertThat(redirectUrl).contains("access_token=");
+    }
+
+    @Test
+    void onAuthenticationSuccess_shouldRejectInvalidUriSyntax() {
+        // Given
+        OAuth2User oAuth2User = createOAuth2User("test@example.com", "Test User");
+        Authentication authentication = createAuthentication(oAuth2User);
+
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+        when(jwtTokenProvider.generateToken(testUser)).thenReturn("jwt-access-token-123");
+        when(refreshTokenService.createRefreshToken(testUser)).thenReturn(testRefreshToken);
+        when(request.getParameter("redirectUrl")).thenReturn("http://[invalid-uri");
+
+        // When/Then
+        assertThrows(IllegalArgumentException.class, () ->
+                handler.onAuthenticationSuccess(request, response, authentication));
     }
 
     // Helper methods
