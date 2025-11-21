@@ -103,7 +103,7 @@ class LocalAuthServiceTest {
             EmailAlreadyExistsException.class,
             () -> localAuthService.signup(request2)
         );
-        assertTrue(exception.getMessage().contains("Email already registered"));
+        assertTrue(exception.getMessage().contains("Unable to complete registration"));
     }
 
     @Test

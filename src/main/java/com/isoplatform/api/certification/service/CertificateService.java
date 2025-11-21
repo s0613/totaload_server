@@ -595,6 +595,8 @@ public class CertificateService {
      */
     @Transactional
     public CertificateResponse createCertificateFromChecklist(Long checklistId, String issuedBy) {
+        User currentUser = getCurrentUser();
+
         try {
             // 1. Get checklist
             VehicleChecklist checklist = checklistService.getChecklistById(checklistId);
@@ -633,6 +635,7 @@ public class CertificateService {
             LocalDate now = LocalDate.now();
 
             Certificate cert = Certificate.builder()
+                    .user(currentUser)
                     .certNumber(certNumber)
                     .issueDate(now)
                     .expireDate(now.plusYears(1))

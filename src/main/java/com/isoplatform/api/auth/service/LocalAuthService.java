@@ -22,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class LocalAuthService {
 
+    private static final String PROVIDER_LOCAL = "LOCAL";
+
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
@@ -34,7 +36,8 @@ public class LocalAuthService {
     public AuthResponse signup(SignupRequest request) {
         // Check if email already exists
         if (userRepository.findByEmail(request.getEmail()).isPresent()) {
-            throw new EmailAlreadyExistsException("Email already registered: " + request.getEmail());
+            log.warn("Attempted registration with existing email: {}", request.getEmail());
+            throw new EmailAlreadyExistsException("Unable to complete registration");
         }
 
         // Create new user
@@ -43,7 +46,7 @@ public class LocalAuthService {
                 .password(passwordEncoder.encode(request.getPassword()))
                 .name(request.getName())
                 .company(request.getCompany() != null ? request.getCompany() : "SELF")
-                .provider("LOCAL")
+                .provider(PROVIDER_LOCAL)
                 .role(Role.USER)
                 .build();
 
@@ -72,7 +75,7 @@ public class LocalAuthService {
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid email or password"));
 
         // Check if provider is LOCAL
-        if (!"LOCAL".equals(user.getProvider())) {
+        if (!PROVIDER_LOCAL.equals(user.getProvider())) {
             throw new OAuth2UserCannotLoginLocallyException(
                     "Please login with " + user.getProvider());
         }
@@ -126,7 +129,8 @@ public class LocalAuthService {
 
     @Transactional
     public void logout(String refreshTokenString) {
+        RefreshToken token = refreshTokenService.verifyRefreshToken(refreshTokenString);
         refreshTokenService.revokeToken(refreshTokenString);
-        log.info("User logged out successfully");
+        log.info("User logged out successfully: {}", token.getUser().getEmail());
     }
 }

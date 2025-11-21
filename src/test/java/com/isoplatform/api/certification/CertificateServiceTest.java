@@ -21,6 +21,10 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.io.TempDir;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.Collections;
 import java.util.Optional;
@@ -54,7 +58,11 @@ public class CertificateServiceTest {
     @MockBean
     private PdfImageConverter pdfImageConverter;
 
+    @TempDir
+    Path tempDir;
+
     private User testUser;
+    private File testPdfFile;
 
     @BeforeEach
     public void setUp() throws Exception {
@@ -70,9 +78,13 @@ public class CertificateServiceTest {
         testUser = userRepository.save(testUser);
         entityManager.flush();
 
-        // PDFParser 모킹 - PDF 생성 시뮬레이션
+        // 실제 테스트 PDF 파일 생성
+        testPdfFile = tempDir.resolve("test-certificate.pdf").toFile();
+        Files.write(testPdfFile.toPath(), "Test PDF Content".getBytes());
+
+        // PDFParser 모킹 - 실제 파일 경로 반환
         when(pdfParser.createCertificatePdf(any()))
-                .thenReturn("/tmp/test-certificate.pdf");
+                .thenReturn(testPdfFile.getAbsolutePath());
 
         // SecurityContext 설정
         UsernamePasswordAuthenticationToken authentication =
