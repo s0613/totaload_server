@@ -42,7 +42,7 @@ gemini:
 
 # JWT 설정 (테스트용)
 jwt:
-  secret: test-secret-key-for-jwt-token-generation-at-least-256-bits-long
+  secret: test-secret-key-for-jwt-token-generation-at-least-512-bits-long-enough-for-hs512-algorithm
   expiration-time: 3600000
 
 # 프론트엔드 URL 설정
