@@ -62,6 +62,46 @@ class AuthDtoValidationTest {
     }
 
     @Test
+    void signupRequest_shouldFailWithLettersOnlyPassword() {
+        SignupRequest request = new SignupRequest();
+        request.setEmail("test@example.com");
+        request.setPassword("abcdefgh");
+        request.setName("Test User");
+
+        Set<ConstraintViolation<SignupRequest>> violations = validator.validate(request);
+
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream()
+                .anyMatch(v -> v.getPropertyPath().toString().equals("password")));
+    }
+
+    @Test
+    void signupRequest_shouldFailWithNumbersOnlyPassword() {
+        SignupRequest request = new SignupRequest();
+        request.setEmail("test@example.com");
+        request.setPassword("12345678");
+        request.setName("Test User");
+
+        Set<ConstraintViolation<SignupRequest>> violations = validator.validate(request);
+
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream()
+                .anyMatch(v -> v.getPropertyPath().toString().equals("password")));
+    }
+
+    @Test
+    void signupRequest_shouldPassWithAlphanumericPassword() {
+        SignupRequest request = new SignupRequest();
+        request.setEmail("test@example.com");
+        request.setPassword("abc12345");
+        request.setName("Test User");
+
+        Set<ConstraintViolation<SignupRequest>> violations = validator.validate(request);
+
+        assertTrue(violations.isEmpty());
+    }
+
+    @Test
     void loginRequest_shouldFailWithBlankFields() {
         LoginRequest request = new LoginRequest();
         request.setEmail("");
@@ -71,6 +111,19 @@ class AuthDtoValidationTest {
 
         assertFalse(violations.isEmpty());
         assertEquals(2, violations.size());
+    }
+
+    @Test
+    void loginRequest_shouldFailWithInvalidEmailFormat() {
+        LoginRequest request = new LoginRequest();
+        request.setEmail("not-an-email");
+        request.setPassword("password123");
+
+        Set<ConstraintViolation<LoginRequest>> violations = validator.validate(request);
+
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream()
+                .anyMatch(v -> v.getPropertyPath().toString().equals("email")));
     }
 
     @Test
