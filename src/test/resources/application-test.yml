@@ -44,6 +44,7 @@ gemini:
 jwt:
   secret: test-secret-key-for-jwt-token-generation-at-least-512-bits-long-enough-for-hs512-algorithm
   expiration-time: 3600000
+  refresh-expiration-time: 604800000
 
 # 프론트엔드 URL 설정
 frontend:

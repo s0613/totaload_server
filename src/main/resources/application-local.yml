@@ -9,7 +9,7 @@ spring:
     hibernate:
       ddl-auto: update
     show-sql: true
-    properties§:
+    properties:
       hibernate:
         dialect: org.hibernate.dialect.MariaDBDialect
         format_sql: true
@@ -19,13 +19,27 @@ spring:
           lob:
             non_contextual_creation: true
 
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID:53065129250-j18ep3e5a75r4qjsv01812fetj5ipk00.apps.googleusercontent.com}
+            client-secret: ${GOOGLE_CLIENT_SECRET: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}
+            scope:
+              - email
+              - profile
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            client-name: Google
+
 gemini:
   api-key: ${GEMINI_API_KEY}
   base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
 
 jwt:
-  secret: ${JWT_SECRET}
+  secret: ${JWT_SECRET:test-secret-key-for-jwt-token-generation-at-least-256-bits-long}
   expiration-time: ${JWT_EXPIRATION_TIME:3600000}
+  refresh-expiration-time: ${JWT_REFRESH_EXPIRATION_TIME:604800000}
 
 server:
   port: 8080
@@ -72,18 +86,3 @@ security:
   api-keys:
     keys:
       qload: qload!
-
-spring:
-  security:
-    oauth2:
-      client:
-        registration:
-          google:
-            client-id: ${GOOGLE_CLIENT_ID:53065129250-j18ep3e5a75r4qjsv01812fetj5ipk00.apps.googleusercontent.com}
-            client-secret: ${GOOGLE_CLIENT_SECRET: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}
-            scope:
-              - email
-              - profile
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-            client-name: Google
-
