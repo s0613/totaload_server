@@ -3,6 +3,7 @@ package com.isoplatform.api.config;
 import com.isoplatform.api.auth.handler.OAuth2AuthenticationFailureHandler;
 import com.isoplatform.api.auth.handler.OAuth2AuthenticationSuccessHandler;
 import com.isoplatform.api.auth.service.CustomOAuth2UserService;
+import com.isoplatform.api.config.filter.ApiKeyAuthFilter;
 import com.isoplatform.api.config.handler.Http401Handler;
 import com.isoplatform.api.config.handler.Http403Handler;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +21,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 
@@ -35,11 +37,14 @@ public class SecurityConfig {
     private final OAuth2AuthenticationSuccessHandler oAuth2AuthenticationSuccessHandler;
     private final OAuth2AuthenticationFailureHandler oAuth2AuthenticationFailureHandler;
     private final UserDetailsService userDetailsService;
+    private final ApiKeyAuthFilter apiKeyAuthFilter;
 
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .addFilterBefore(apiKeyAuthFilter, UsernamePasswordAuthenticationFilter.class)
+
                 // 접근 권한
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
@@ -55,12 +60,15 @@ public class SecurityConfig {
                                 "/v3/api-docs/**",
                                 "/swagger-resources/**",
                                 "/swagger-ui.html",
-                                "/api/certificates/issue",
+                                "/api/certificates/issue"
+                        )
+                        .permitAll()
+                        .requestMatchers(
                                 "/api/photos/**",
                                 "/api/checklists/**",
                                 "/api/certificates/from-checklist"
                         )
-                        .permitAll()
+                        .authenticated()
                         .anyRequest().authenticated())
 
                 // OAuth2 로그인 설정
