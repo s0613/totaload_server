@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -45,9 +46,13 @@ public class PhotoService {
                 storageDir.mkdirs();
             }
 
-            // Save file to storage
+            // Save file to storage with REPLACE_EXISTING to handle duplicate filenames safely
             Path destinationPath = Paths.get(photosStoragePath, uniqueFilename);
-            Files.copy(file.getInputStream(), destinationPath);
+            Files.copy(
+                file.getInputStream(),
+                destinationPath,
+                StandardCopyOption.REPLACE_EXISTING
+            );
 
             // Create Photo entity
             Photo photo = Photo.builder()
