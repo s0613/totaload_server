@@ -17,6 +17,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -179,14 +180,27 @@ public class PhotoService {
             throw new IllegalArgumentException("파일이 비어있습니다.");
         }
 
+        // Whitelist allowed image formats (reject SVG, BMP, and other unsafe/unintended formats)
         String contentType = file.getContentType();
-        if (contentType == null || (!contentType.startsWith("image/"))) {
-            throw new IllegalArgumentException("이미지 파일만 업로드 가능합니다.");
+        Set<String> allowedTypes = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif"
+        );
+
+        if (contentType == null || !allowedTypes.contains(contentType)) {
+            throw new IllegalArgumentException(
+                "지원하는 이미지 형식: JPEG, PNG, WebP, GIF"
+            );
         }
 
         // Max 10MB
-        if (file.getSize() > 10 * 1024 * 1024) {
-            throw new IllegalArgumentException("파일 크기는 10MB를 초과할 수 없습니다.");
+        long maxSize = 10 * 1024 * 1024;
+        if (file.getSize() > maxSize) {
+            throw new IllegalArgumentException(
+                String.format("파일 크기는 %dMB를 초과할 수 없습니다.", maxSize / (1024 * 1024))
+            );
         }
     }
 
