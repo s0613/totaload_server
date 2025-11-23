@@ -14,7 +14,9 @@ import com.isoplatform.api.auth.repository.UserRepository;
 import com.isoplatform.api.auth.service.GoogleTokenService;
 import com.isoplatform.api.auth.service.JwtTokenProvider;
 import com.isoplatform.api.auth.service.LocalAuthService;
+import com.isoplatform.api.auth.service.RefreshTokenService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -33,6 +35,7 @@ public class AuthController {
 
     private final LocalAuthService localAuthService;
     private final GoogleTokenService googleTokenService;
+    private final RefreshTokenService refreshTokenService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRepository userRepository;
     private final JwtTokenProvider jwtTokenProvider;
@@ -90,24 +93,49 @@ public class AuthController {
     }
 
     /**
+     * Logout from all devices by revoking all refresh tokens
+     * Requires valid access token in Authorization header
+     *
+     * @param authentication Spring Security authentication (from JWT)
+     * @return 200 OK on successful logout
+     */
+    @PostMapping("/logout-all")
+    public ResponseEntity<Void> logoutAll(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            log.warn("Unauthorized logout-all attempt");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Authentication required");
+        }
+
+        String email = authentication.getName();
+        log.info("Logout-all request for user: {}", email);
+
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        refreshTokenService.revokeAllUserTokens(user);
+
+        return ResponseEntity.ok().build();
+    }
+
+    /**
      * Mobile token exchange - Google auth code to JWT
      * Used by mobile apps with PKCE flow
+     * NOTE: redirectUri is server-configured for security (not from client)
      */
     @PostMapping("/mobile/token")
     public ResponseEntity<MobileTokenResponse> mobileTokenExchange(
             @Valid @RequestBody MobileTokenRequest request) {
         try {
-            log.info("Mobile token exchange request for redirect URI: {}", request.getRedirectUri());
+            log.info("Mobile token exchange request received");
 
-            // 1. Exchange Google auth code for Google tokens
-            GoogleTokenService.GoogleTokenResponse googleTokens = googleTokenService.exchangeCodeForTokens(
+            // 1. Exchange Google auth code for Google tokens (using server-configured redirect URI)
+            GoogleTokenService.GoogleTokenResponse googleTokens = googleTokenService.exchangeCodeForTokensMobile(
                 request.getAuthorizationCode(),
-                request.getCodeVerifier(),
-                request.getRedirectUri()
+                request.getCodeVerifier()
             );
 
-            // 2. Verify Google ID token and extract user info
-            GoogleTokenService.GoogleUserInfo googleUser = googleTokenService.verifyIdToken(
+            // 2. Verify Google ID token and extract user info (mobile audience)
+            GoogleTokenService.GoogleUserInfo googleUser = googleTokenService.verifyIdTokenMobile(
                 googleTokens.getIdToken()
             );
 
@@ -127,8 +155,9 @@ public class AuthController {
                 });
 
             // 4. Update email if changed (email can change, sub cannot)
-            if (!user.getEmail().equals(googleUser.getEmail())) {
-                user.setEmail(googleUser.getEmail());
+            String googleEmail = googleUser.getEmail();
+            if (googleEmail != null && !googleEmail.equals(user.getEmail())) {
+                user.setEmail(googleEmail);
                 userRepository.save(user);
             }
 
