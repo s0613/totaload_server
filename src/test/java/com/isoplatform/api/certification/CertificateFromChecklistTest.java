@@ -75,9 +75,23 @@ class CertificateFromChecklistTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        // Use unique emails to avoid constraint violations
+        String uniqueId = java.util.UUID.randomUUID().toString().substring(0, 8);
+
+        // Create api-key-user if not exists (required for API key authentication)
+        if (!userRepository.existsByEmail("api-key-user")) {
+            User apiKeyUser = User.builder()
+                    .email("api-key-user")
+                    .password("password")
+                    .name("API Key User")
+                    .role(Role.USER)
+                    .build();
+            userRepository.save(apiKeyUser);
+        }
+
         // Create test user
         testUser = User.builder()
-                .email("test@example.com")
+                .email("test-" + uniqueId + "@example.com")
                 .password("password")
                 .name("테스트 사용자")
                 .role(Role.USER)
@@ -85,10 +99,10 @@ class CertificateFromChecklistTest {
         testUser = userRepository.save(testUser);
         entityManager.flush();
 
-        // Set up SecurityContext
+        // Set up SecurityContext with the actual test user email
         UsernamePasswordAuthenticationToken authentication =
                 new UsernamePasswordAuthenticationToken(
-                        "test@example.com",
+                        testUser.getEmail(),
                         "password",
                         Collections.emptyList()
                 );
