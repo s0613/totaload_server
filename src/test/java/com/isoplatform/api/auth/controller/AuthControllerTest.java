@@ -265,4 +265,44 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.message").exists())
                 .andExpect(jsonPath("$.timestamp").exists());
     }
+
+    @Test
+    void logoutAll_WithValidAccessToken_ShouldRevokeAllTokens() throws Exception {
+        // Given: Create and authenticate user
+        SignupRequest signupRequest = new SignupRequest();
+        signupRequest.setEmail("logoutall@test.com");
+        signupRequest.setPassword("Test1234!");
+        signupRequest.setName("Test User");
+
+        MvcResult signupResult = mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(signupRequest)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        String signupResponse = signupResult.getResponse().getContentAsString();
+        Map<String, Object> signupData = objectMapper.readValue(signupResponse, Map.class);
+        String accessToken = (String) signupData.get("accessToken");
+        String refreshToken = (String) signupData.get("refreshToken");
+
+        // When: Call logout-all with access token
+        mockMvc.perform(post("/api/auth/logout-all")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
+
+        // Then: Refresh token should be invalid
+        RefreshTokenRequest refreshRequest = new RefreshTokenRequest();
+        refreshRequest.setRefreshToken(refreshToken);
+
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(refreshRequest)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void logoutAll_WithoutToken_ShouldReturnUnauthorized() throws Exception {
+        mockMvc.perform(post("/api/auth/logout-all"))
+                .andExpect(status().isUnauthorized());
+    }
 }
