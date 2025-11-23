@@ -33,6 +33,7 @@ dependencies {
 
     // OAuth2 Client
     implementation 'org.springframework.boot:spring-boot-starter-oauth2-client'
+    implementation 'com.google.api-client:google-api-client:2.2.0'
 
     // .env file support
     implementation 'me.paulschwarz:spring-dotenv:4.0.0'

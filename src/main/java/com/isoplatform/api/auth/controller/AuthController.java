@@ -1,9 +1,18 @@
 package com.isoplatform.api.auth.controller;
 
+import com.isoplatform.api.auth.RefreshToken;
+import com.isoplatform.api.auth.User;
+import com.isoplatform.api.auth.Role;
 import com.isoplatform.api.auth.dto.AuthResponse;
 import com.isoplatform.api.auth.dto.LoginRequest;
+import com.isoplatform.api.auth.dto.MobileTokenRequest;
+import com.isoplatform.api.auth.dto.MobileTokenResponse;
 import com.isoplatform.api.auth.dto.RefreshTokenRequest;
 import com.isoplatform.api.auth.dto.SignupRequest;
+import com.isoplatform.api.auth.repository.RefreshTokenRepository;
+import com.isoplatform.api.auth.repository.UserRepository;
+import com.isoplatform.api.auth.service.GoogleTokenService;
+import com.isoplatform.api.auth.service.JwtTokenProvider;
 import com.isoplatform.api.auth.service.LocalAuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +20,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Slf4j
 @RestController
@@ -19,6 +32,10 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final LocalAuthService localAuthService;
+    private final GoogleTokenService googleTokenService;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRepository userRepository;
+    private final JwtTokenProvider jwtTokenProvider;
 
     /**
      * Register a new user with email and password
@@ -70,5 +87,76 @@ public class AuthController {
         log.info("Logout request");
         localAuthService.logout(request.getRefreshToken());
         return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Mobile token exchange - Google auth code to JWT
+     * Used by mobile apps with PKCE flow
+     */
+    @PostMapping("/mobile/token")
+    public ResponseEntity<MobileTokenResponse> mobileTokenExchange(
+            @Valid @RequestBody MobileTokenRequest request) {
+        try {
+            log.info("Mobile token exchange request for redirect URI: {}", request.getRedirectUri());
+
+            // 1. Exchange Google auth code for Google tokens
+            GoogleTokenService.GoogleTokenResponse googleTokens = googleTokenService.exchangeCodeForTokens(
+                request.getAuthorizationCode(),
+                request.getCodeVerifier(),
+                request.getRedirectUri()
+            );
+
+            // 2. Verify Google ID token and extract user info
+            GoogleTokenService.GoogleUserInfo googleUser = googleTokenService.verifyIdToken(
+                googleTokens.getIdToken()
+            );
+
+            // 3. Find or create user (using sub as providerId, NOT email)
+            User user = userRepository.findByProviderAndProviderId("GOOGLE", googleUser.getSub())
+                .orElseGet(() -> {
+                    User newUser = User.builder()
+                        .email(googleUser.getEmail())
+                        .provider("GOOGLE")
+                        .providerId(googleUser.getSub())
+                        .name(googleUser.getName())
+                        .password("")  // OAuth users don't have password
+                        .role(Role.USER)
+                        .company("SELF")
+                        .build();
+                    return userRepository.save(newUser);
+                });
+
+            // 4. Update email if changed (email can change, sub cannot)
+            if (!user.getEmail().equals(googleUser.getEmail())) {
+                user.setEmail(googleUser.getEmail());
+                userRepository.save(user);
+            }
+
+            // 5. Generate JWT access token
+            String accessToken = jwtTokenProvider.generateToken(user);
+
+            // 6. Generate and store refresh token in DB (7 days)
+            String refreshTokenValue = UUID.randomUUID().toString();
+            RefreshToken refreshToken = RefreshToken.builder()
+                .token(refreshTokenValue)
+                .user(user)
+                .expiryDate(LocalDateTime.now().plusDays(7))
+                .build();
+            refreshTokenRepository.save(refreshToken);
+
+            log.info("Mobile token exchange successful for user: {}", user.getEmail());
+
+            return ResponseEntity.ok(MobileTokenResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshTokenValue)
+                .expiresIn(900)  // 15 minutes in seconds
+                .email(user.getEmail())
+                .name(user.getName())
+                .build());
+
+        } catch (Exception e) {
+            log.error("Mobile token exchange failed: {}", e.getMessage());
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token exchange failed");
+        }
     }
 }
