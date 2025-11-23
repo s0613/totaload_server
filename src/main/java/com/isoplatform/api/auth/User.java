@@ -3,6 +3,7 @@ package com.isoplatform.api.auth;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -26,6 +27,30 @@ public class User {
 
     @Column(nullable = false, length = 255)
     private String password;
+
+    @Column(unique = true, length = 50)
+    private String username;
+
+    @Column(length = 15)
+    private String phoneNumber;
+
+    @Column
+    private LocalDate birthdate;
+
+    @Column
+    private Boolean isEvaluator;
+
+    @Column(length = 50)
+    private String evaluatorCertNumber;
+
+    @Column
+    private LocalDate evaluatorCertExpiry;
+
+    @Column(length = 500)
+    private String evaluatorCertCopyUrl;
+
+    @Column
+    private Boolean agreeMarketing;
 
     // ✅ NOT NULL 컬럼
     @Column(nullable = false, length = 50)

@@ -74,14 +74,21 @@ class SecurityConfigIntegrationTest {
 
     @Test
     void shouldAllowAuthEndpointsWithoutAuth() throws Exception {
-        // Auth endpoints should be accessible without token
-        // OAuth2 endpoints might not exist in test environment, but they should NOT return 401
-        mockMvc.perform(get("/api/auth/test"))
+        // Public auth endpoints should be accessible without token
+        // Test login endpoint - should NOT return 401 (may return 405 for GET, but not 401)
+        mockMvc.perform(get("/api/auth/login"))
                 .andExpect(result -> {
                     int status = result.getResponse().getStatus();
                     if (status == 401) {
-                        throw new AssertionError("Expected auth endpoint to not require JWT authentication, but got 401 Unauthorized");
+                        throw new AssertionError("Expected public auth endpoint /api/auth/login to not require JWT authentication, but got 401 Unauthorized");
                     }
                 });
+    }
+
+    @Test
+    void shouldRequireAuthForLogoutAllEndpoint() throws Exception {
+        // /api/auth/logout-all requires authentication - should return 401 without token
+        mockMvc.perform(get("/api/auth/logout-all"))
+                .andExpect(status().isUnauthorized());
     }
 }
