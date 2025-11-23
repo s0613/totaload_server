@@ -55,6 +55,13 @@ auth:
   allowed-redirect-domains:
     - localhost:3000
 
+# Mobile OAuth 설정 (테스트용)
+app:
+  oauth:
+    mobile:
+      client-id: test-mobile-client-id
+      redirect-uri: com.totaload.app:/oauth2redirect
+
 # Security API Keys
 security:
   api-keys:

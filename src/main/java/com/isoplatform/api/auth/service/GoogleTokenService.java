@@ -23,39 +23,86 @@ public class GoogleTokenService {
     private static final String GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
     private final RestTemplate restTemplate;
-    private final String clientId;
-    private final String clientSecret;
-    private final GoogleIdTokenVerifier verifier;
+
+    // Web client (기존 - client_secret 사용)
+    private final String webClientId;
+    private final String webClientSecret;
+
+    // Mobile client (PKCE - client_secret 없음)
+    private final String mobileClientId;
+    private final String mobileRedirectUri;
+
+    private final GoogleIdTokenVerifier webVerifier;
+    private final GoogleIdTokenVerifier mobileVerifier;
 
     public GoogleTokenService(
             RestTemplate restTemplate,
-            @Value("${spring.security.oauth2.client.registration.google.client-id}") String clientId,
-            @Value("${spring.security.oauth2.client.registration.google.client-secret}") String clientSecret) {
+            @Value("${spring.security.oauth2.client.registration.google.client-id}") String webClientId,
+            @Value("${spring.security.oauth2.client.registration.google.client-secret}") String webClientSecret,
+            @Value("${app.oauth.mobile.client-id}") String mobileClientId,
+            @Value("${app.oauth.mobile.redirect-uri}") String mobileRedirectUri) {
         this.restTemplate = restTemplate;
-        this.clientId = clientId;
-        this.clientSecret = clientSecret;
-        this.verifier = new GoogleIdTokenVerifier.Builder(
+        this.webClientId = webClientId;
+        this.webClientSecret = webClientSecret;
+        this.mobileClientId = mobileClientId;
+        this.mobileRedirectUri = mobileRedirectUri;
+
+        // Web verifier
+        this.webVerifier = new GoogleIdTokenVerifier.Builder(
             new NetHttpTransport(),
             GsonFactory.getDefaultInstance()
         )
-            .setAudience(Collections.singletonList(clientId))
+            .setAudience(Collections.singletonList(webClientId))
+            .build();
+
+        // Mobile verifier (다른 audience)
+        this.mobileVerifier = new GoogleIdTokenVerifier.Builder(
+            new NetHttpTransport(),
+            GsonFactory.getDefaultInstance()
+        )
+            .setAudience(Collections.singletonList(mobileClientId))
             .build();
     }
 
     /**
-     * Exchange Google authorization code for tokens
+     * Get configured mobile redirect URI (for security - don't trust client input)
+     */
+    public String getMobileRedirectUri() {
+        return mobileRedirectUri;
+    }
+
+    /**
+     * Exchange Google authorization code for tokens (Web - with client_secret)
      */
     public GoogleTokenResponse exchangeCodeForTokens(String code, String codeVerifier, String redirectUri) {
+        return doTokenExchange(code, codeVerifier, redirectUri, webClientId, webClientSecret);
+    }
+
+    /**
+     * Exchange Google authorization code for tokens (Mobile PKCE - no client_secret)
+     * Uses server-configured redirect URI for security
+     */
+    public GoogleTokenResponse exchangeCodeForTokensMobile(String code, String codeVerifier) {
+        log.info("Mobile token exchange with configured redirect URI: {}", mobileRedirectUri);
+        return doTokenExchange(code, codeVerifier, mobileRedirectUri, mobileClientId, null);
+    }
+
+    private GoogleTokenResponse doTokenExchange(String code, String codeVerifier, String redirectUri,
+                                                 String clientId, String clientSecret) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
         MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
         params.add("code", code);
         params.add("client_id", clientId);
-        params.add("client_secret", clientSecret);
         params.add("redirect_uri", redirectUri);
         params.add("grant_type", "authorization_code");
         params.add("code_verifier", codeVerifier);
+
+        // client_secret은 Web 클라이언트에만 필요 (PKCE 모바일은 불필요)
+        if (clientSecret != null && !clientSecret.isEmpty()) {
+            params.add("client_secret", clientSecret);
+        }
 
         HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(params, headers);
 
@@ -74,13 +121,24 @@ public class GoogleTokenService {
     }
 
     /**
-     * Verify Google ID token and extract user info
+     * Verify Google ID token and extract user info (Web client)
      */
     public GoogleUserInfo verifyIdToken(String idToken) {
+        return doVerifyIdToken(idToken, webVerifier, "web");
+    }
+
+    /**
+     * Verify Google ID token and extract user info (Mobile client)
+     */
+    public GoogleUserInfo verifyIdTokenMobile(String idToken) {
+        return doVerifyIdToken(idToken, mobileVerifier, "mobile");
+    }
+
+    private GoogleUserInfo doVerifyIdToken(String idToken, GoogleIdTokenVerifier verifier, String clientType) {
         try {
             GoogleIdToken googleIdToken = verifier.verify(idToken);
             if (googleIdToken == null) {
-                throw new RuntimeException("Invalid ID token");
+                throw new RuntimeException("Invalid ID token for " + clientType + " client");
             }
 
             GoogleIdToken.Payload payload = googleIdToken.getPayload();
@@ -92,7 +150,7 @@ public class GoogleTokenService {
                 .pictureUrl((String) payload.get("picture"))
                 .build();
         } catch (Exception e) {
-            log.error("Failed to verify ID token: {}", e.getMessage());
+            log.error("Failed to verify {} ID token: {}", clientType, e.getMessage());
             throw new RuntimeException("ID token verification failed", e);
         }
     }

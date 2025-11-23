@@ -60,6 +60,15 @@ auth:
   allowed-redirect-domains:
     - localhost:3000
 
+# Mobile OAuth 설정 (Android PKCE)
+app:
+  oauth:
+    mobile:
+      # Android 클라이언트 (PKCE 사용, client_secret 없음)
+      client-id: 53065129250-s3fk4rfuritk8e629lh9e4gb5lp6kvhm.apps.googleusercontent.com
+      # Android redirect URI (custom scheme)
+      redirect-uri: com.totaload.app:/oauth2redirect
+
 # Swagger 설정
 springdoc:
   version: 1.0.0
