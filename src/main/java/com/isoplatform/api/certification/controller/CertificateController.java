@@ -132,13 +132,8 @@ public class CertificateController {
      * 인증서 전체 조회 (iso-server 통합)
      */
     @GetMapping
-    public ResponseEntity<List<CertificateResponse>> getAllCertificates(
-            @RequestHeader("X-API-KEY") String apiKey) {
-        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
-        if (!validationResult.isValid()) {
-            return ResponseEntity.status(401).build();
-        }
-
+    public ResponseEntity<List<CertificateResponse>> getAllCertificates() {
+        // Spring Security가 이미 인증 처리함 (authenticated())
         try {
             List<CertificateResponse> certificates = certificateService.getAllCertificates();
             return ResponseEntity.ok(certificates);
@@ -152,14 +147,7 @@ public class CertificateController {
      * ID로 인증서 단건 조회 (iso-server 통합)
      */
     @GetMapping("/{id}")
-    public ResponseEntity<CertificateResponse> getCertificateById(
-            @PathVariable Long id,
-            @RequestHeader("X-API-KEY") String apiKey) {
-        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
-        if (!validationResult.isValid()) {
-            return ResponseEntity.status(401).build();
-        }
-
+    public ResponseEntity<CertificateResponse> getCertificateById(@PathVariable Long id) {
         try {
             CertificateResponse certificate = certificateService.getCertificateById(id);
             return ResponseEntity.ok(certificate);
@@ -175,17 +163,8 @@ public class CertificateController {
      * 인증서 발급 요청 - 발급자 ID가 리스트에 자동 추가됨 (iso-server 통합)
      */
     @PostMapping("/{id}/issue")
-    public ResponseEntity<CertificateResponse> issueCertificateRequest(
-            @PathVariable Long id,
-            @RequestHeader("X-API-KEY") String apiKey) {
-
-        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
-        if (!validationResult.isValid()) {
-            return ResponseEntity.status(401).build();
-        }
-
+    public ResponseEntity<CertificateResponse> issueCertificateRequest(@PathVariable Long id) {
         try {
-            // 현재 인증된 사용자 가져오기
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             String email = authentication.getName();
             User user = userRepository.findByEmail(email)
@@ -210,14 +189,7 @@ public class CertificateController {
      * 특정 인증서의 발급자 ID 리스트 조회 (iso-server 통합)
      */
     @GetMapping("/{certificateId}/issuers")
-    public ResponseEntity<List<Long>> getCertificateIssuers(
-            @PathVariable Long certificateId,
-            @RequestHeader("X-API-KEY") String apiKey) {
-        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
-        if (!validationResult.isValid()) {
-            return ResponseEntity.status(401).build();
-        }
-
+    public ResponseEntity<List<Long>> getCertificateIssuers(@PathVariable Long certificateId) {
         try {
             CertificateResponse certificate = certificateService.getCertificateById(certificateId);
             return ResponseEntity.ok(certificate.getIssuerUserIds());
@@ -233,14 +205,7 @@ public class CertificateController {
      * 특정 발급자가 발급한 인증서 조회 (iso-server 통합)
      */
     @GetMapping("/issued-by/{userId}")
-    public ResponseEntity<List<CertificateResponse>> getCertificatesByIssuer(
-            @PathVariable Long userId,
-            @RequestHeader("X-API-KEY") String apiKey) {
-        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
-        if (!validationResult.isValid()) {
-            return ResponseEntity.status(401).build();
-        }
-
+    public ResponseEntity<List<CertificateResponse>> getCertificatesByIssuer(@PathVariable Long userId) {
         try {
             List<CertificateResponse> certificates = certificateService.getCertificatesByIssuer(userId);
             return ResponseEntity.ok(certificates);
@@ -254,13 +219,7 @@ public class CertificateController {
      * 현재 로그인된 사용자가 발급한 인증서 조회 (iso-server 통합)
      */
     @GetMapping("/my-issued")
-    public ResponseEntity<List<CertificateResponse>> getMyIssuedCertificates(
-            @RequestHeader("X-API-KEY") String apiKey) {
-        ApiKeyService.ApiKeyValidationResult validationResult = apiKeyService.validateApiKeyWithDetails(apiKey);
-        if (!validationResult.isValid()) {
-            return ResponseEntity.status(401).build();
-        }
-
+    public ResponseEntity<List<CertificateResponse>> getMyIssuedCertificates() {
         try {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
             String email = authentication.getName();
