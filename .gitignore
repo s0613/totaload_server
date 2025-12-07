@@ -16,6 +16,9 @@ bin/
 .env.*
 !.env.example
 
+# Local development configuration - contains sensitive defaults
+src/main/resources/application-local.yml
+
 # Application configuration backups
 application-local.yml.backup
 
