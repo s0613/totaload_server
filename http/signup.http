@@ -1,0 +1,134 @@
+### ==================== 회원가입 API 테스트 ====================
+
+### 1. 일반 사용자 회원가입 요청
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "user2025@example.com",
+  "username": "testuser2025",
+  "password": "password123",
+  "confirmPassword": "password123",
+  "name": "테스트 사용자",
+  "birthdate": "1990-05-15",
+  "phoneNumber": "010-1234-5678",
+  "agreeMarketing": true
+}
+
+### 2. 평가사 회원가입 요청
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "evaluator2025@example.com",
+  "username": "evaluator_user2025",
+  "password": "evalpass123",
+  "confirmPassword": "evalpass123",
+  "name": "평가사 김",
+  "phoneNumber": "010-9876-5432",
+  "isEvaluator": true,
+  "evaluatorCertNumber": "EVAL-2025-00001",
+  "evaluatorCertExpiry": "2026-12-31",
+  "evaluatorCertCopyUrl": "https://example.com/certificates/eval-2025-00001.pdf",
+  "agreeMarketing": false
+}
+
+### 3. 필수 필드 누락 테스트 (이메일 누락)
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "username": "nomail_user2025",
+  "password": "password123",
+  "confirmPassword": "password123",
+  "name": "메일없음 사용자"
+}
+
+### 4. 비밀번호 불일치 테스트
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "mismatch2025@example.com",
+  "username": "mismatched_user2025",
+  "password": "password123",
+  "confirmPassword": "password456",
+  "name": "불일치 사용자"
+}
+
+### 5. 비밀번호 너무 짧음 테스트 (8자 미만)
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "short2025@example.com",
+  "username": "shortpass_user2025",
+  "password": "short1",
+  "confirmPassword": "short1",
+  "name": "짧은비밀번호 사용자"
+}
+
+### 6. 유효하지 않은 이메일 형식 테스트
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "invalid-email-format",
+  "username": "invalid_email_user2025",
+  "password": "password123",
+  "confirmPassword": "password123",
+  "name": "잘못된이메일 사용자"
+}
+
+### 7. 사용자명 너무 짧음 테스트 (3자 미만)
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "shortname2025@example.com",
+  "username": "ab2025",
+  "password": "password123",
+  "confirmPassword": "password123",
+  "name": "짧은사용자명 사용자"
+}
+
+### 8. 모든 선택사항 필드 포함 테스트
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "fullinfo2025@example.com",
+  "username": "full_info_user2025",
+  "password": "ComplexPass123!@",
+  "confirmPassword": "ComplexPass123!@",
+  "name": "완전정보 사용자",
+  "birthdate": "1995-10-20",
+  "phoneNumber": "010-5555-5555",
+  "agreeMarketing": true
+}
+
+### 9. 평가사 회원가입 - 인증서 정보 누락 테스트
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "incomplete_eval2025@example.com",
+  "username": "incomplete_evaluator2025",
+  "password": "evalpass123",
+  "confirmPassword": "evalpass123",
+  "name": "미완성 평가사",
+  "isEvaluator": true,
+  "evaluatorCertNumber": "EVAL-2025-00002"
+}
+
+### 10. 최소 필수 정보만 포함된 회원가입 요청
+POST http://localhost:8080/api/auth/signup
+Content-Type: application/json
+
+{
+  "email": "minimal2025@example.com",
+  "username": "minimal_user2025",
+  "password": "minimalpass123",
+  "confirmPassword": "minimalpass123",
+  "name": "최소정보 사용자"
+}

@@ -1,0 +1,59 @@
+### ==================== 로그인 API 테스트 ====================
+
+### 1. 이메일로 로그인
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "usernameOrEmail": "user2025@example.com",
+  "password": "password123"
+}
+
+### 2. 사용자명으로 로그인
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "usernameOrEmail": "testuser2025",
+  "password": "password123"
+}
+
+### 3. 평가사 계정 이메일로 로그인
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "usernameOrEmail": "evaluator2025@example.com",
+  "password": "evalpass123"
+}
+
+### 4. 잘못된 비밀번호 테스트
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "usernameOrEmail": "user2025@example.com",
+  "password": "wrongpassword"
+}
+
+### 5. 존재하지 않는 사용자 테스트
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "usernameOrEmail": "nonexistent@example.com",
+  "password": "password123"
+}
+
+### 6. 빈 필드 테스트
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "usernameOrEmail": "",
+  "password": ""
+}
+
+### 7. 현재 사용자 정보 조회 (로그인 후 받은 accessToken 필요)
+GET http://localhost:8080/api/auth/me
+Authorization: Bearer {{accessToken}}

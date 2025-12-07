@@ -1,0 +1,29 @@
+spring:
+  profiles:
+    active: local
+
+# OAuth2 보안 설정 (기본값)
+auth:
+  allowed-redirect-domains:
+    - localhost:3000
+
+# SpringDoc ??
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+
+management:
+  endpoints:  # endpoint? ??? endpoints
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info  # ??? ????? ??
+  endpoint:
+    health:
+      show-details: when-authorized  # ???? ?? ?? ?? ??
+  health:
+    db:
+      enabled: true

@@ -1,0 +1,48 @@
+# Gradle 빌드 디렉터리
+build/
+.gradle/
+bin/
+
+# IDE 설정
+.idea/
+*.iml
+.claude/
+
+# OS 불필요 파일
+.DS_Store
+
+# Environment variables - SECURITY CRITICAL
+.env
+.env.*
+!.env.example
+
+# Application configuration backups
+application-local.yml.backup
+
+# Git worktrees
+.worktrees/
+
+# Sensitive credential files - NEVER COMMIT
+**/client_secret*.json
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+
+# User data & generated files
+storage/
+certificates/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# Docker artifacts
+*.tar.gz

@@ -1,0 +1,70 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DATABASE_TO_LOWER=TRUE;NON_KEYWORDS=YEAR
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: true
+
+  h2:
+    console:
+      enabled: true
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-client-id
+            client-secret: test-client-secret
+            scope: profile, email
+        provider:
+          google:
+            authorization-uri: https://accounts.google.com/o/oauth2/v2/auth
+            token-uri: https://oauth2.googleapis.com/token
+            user-info-uri: https://www.googleapis.com/oauth2/v3/userinfo
+            user-name-attribute: sub
+
+
+
+# Gemini API (테스트용 더미)
+gemini:
+  api-key: test-gemini-api-key
+  base-url: https://generativelanguage.googleapis.com
+
+# JWT 설정 (테스트용)
+jwt:
+  secret: test-secret-key-for-jwt-token-generation-at-least-512-bits-long-enough-for-hs512-algorithm
+  expiration-time: 3600000
+  refresh-expiration-time: 604800000
+
+# 프론트엔드 URL 설정
+frontend:
+  url: http://localhost:3000
+
+# OAuth2 보안 설정
+auth:
+  allowed-redirect-domains:
+    - localhost:3000
+
+# Mobile OAuth 설정 (테스트용)
+app:
+  oauth:
+    mobile:
+      client-id: test-mobile-client-id-placeholder
+      android-client-id: test-android-client-id-placeholder
+      ios-client-id: test-ios-client-id-placeholder
+      redirect-uri: com.totaload.app:/oauth2redirect
+
+logging:
+  level:
+    com.isoplatform: DEBUG
+    org.hibernate.SQL: DEBUG

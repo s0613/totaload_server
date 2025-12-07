@@ -1,0 +1,89 @@
+spring:
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 50MB
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.mariadb.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MariaDBDialect
+        format_sql: false
+        jdbc:
+          lob:
+            non_contextual_creation: true
+
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            scope:
+              - email
+              - profile
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            client-name: Google
+
+gemini:
+  api-key: ${GEMINI_API_KEY}
+  base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration-time: ${JWT_EXPIRATION_TIME:3600000}
+  refresh-expiration-time: ${JWT_REFRESH_EXPIRATION_TIME:604800000}
+
+server:
+  port: 8080
+  forward-headers-strategy: framework
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+
+frontend:
+  url: ${FRONTEND_URL:https://www.totaloadcert.com}
+
+auth:
+  allowed-redirect-domains:
+    - www.totaloadcert.com
+    - totaloadcert.com
+
+app:
+  oauth:
+    mobile:
+      android-client-id: 53065129250-s3fk4rfuritk8e629lh9e4gb5lp6kvhm.apps.googleusercontent.com
+      ios-client-id: 53065129250-v1n32828efdgs7rht4tnu2pg00ae8vcd.apps.googleusercontent.com
+      redirect-uri: com.totaload.app:/oauth2redirect
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.isoplatform: INFO
+
+aws:
+  s3:
+    bucket: ${AWS_S3_BUCKET:iso-platform-static}
+    region: ${AWS_REGION:ap-northeast-2}
+  cloudfront:
+    domain: ${AWS_CLOUDFRONT_DOMAIN:d17jydeshy2zxe.cloudfront.net}
+
+apple:
+  client-id: com.totaload.app
