@@ -6,10 +6,13 @@ import com.isoplatform.api.auth.User;
 import com.isoplatform.api.auth.repository.UserRepository;
 import com.isoplatform.api.certification.controller.CertificateController;
 import com.isoplatform.api.certification.service.CertificateService;
+import com.isoplatform.api.inspection.Photo;
 import com.isoplatform.api.inspection.VehicleChecklist;
 import com.isoplatform.api.inspection.request.ChecklistSubmissionRequest;
 import com.isoplatform.api.inspection.service.ChecklistService;
+import com.isoplatform.api.inspection.service.PhotoService;
 import com.isoplatform.api.storage.S3Service;
+import com.isoplatform.api.util.Gemini;
 import com.isoplatform.api.util.PDFParser;
 import com.isoplatform.api.util.S3UploadResult;
 import jakarta.persistence.EntityManager;
@@ -66,6 +69,12 @@ class CertificateFromChecklistTest {
 
     @MockBean
     private S3Service s3Service;
+
+    @MockBean
+    private PhotoService photoService;
+
+    @MockBean
+    private Gemini gemini;
 
     @TempDir
     Path tempDir;
@@ -124,6 +133,24 @@ class CertificateFromChecklistTest {
                         .cloudFrontUrl("https://test.cloudfront.net/certificates/test-file.pdf")
                         .build());
 
+        // Mock PhotoService to return test photos
+        Photo testPhoto = Photo.builder()
+                .id(1L)
+                .vin("1HGCM82633A004352")
+                .category("A")
+                .itemCode("A1")
+                .fileName("test-photo.jpg")
+                .storagePath("photos/test-photo.jpg")
+                .cloudFrontUrl("https://test.cloudfront.net/photos/test-photo.jpg")
+                .fileSize(1024L)
+                .contentType("image/jpeg")
+                .uploadedAt(java.time.LocalDateTime.now())
+                .build();
+        when(photoService.getPhotosByVin(anyString())).thenReturn(List.of(testPhoto));
+
+        // Mock Gemini AI validation to pass all images
+        when(gemini.checkImageDescriptions(any(), any())).thenReturn(List.of(true));
+
         // Create a test checklist first
         ChecklistSubmissionRequest.ChecklistItemData item1 = new ChecklistSubmissionRequest.ChecklistItemData();
         item1.setCode("A1");
@@ -140,7 +167,7 @@ class CertificateFromChecklistTest {
 
         ChecklistSubmissionRequest request = new ChecklistSubmissionRequest();
         request.setVehicleNumber("12가3456");
-        request.setVin("TEST_VIN_FOR_CERT");
+        request.setVin("1HGCM82633A004352");  // Valid 17-character VIN
         request.setVehicleInfo(vehicleInfo);
         request.setItems(List.of(item1));
         request.setStatus("completed");
@@ -169,11 +196,12 @@ class CertificateFromChecklistTest {
         int status = result1.getResponse().getStatus();
         String body = result1.getResponse().getContentAsString();
 
-        // If status is 500, this is the actual test failure
-        if (status == 500) {
-            throw new AssertionError("Certificate creation failed with 500: " + body);
+        // Check for any error status
+        if (status != 200) {
+            throw new AssertionError("Certificate creation failed with " + status + ": " + body);
         }
 
+        // Second call - should return existing certificate
         mockMvc.perform(post("/api/certificates/from-checklist")
                         .param("checklistId", createdChecklistId.toString())
                         .header("X-API-KEY", "test-key"))
