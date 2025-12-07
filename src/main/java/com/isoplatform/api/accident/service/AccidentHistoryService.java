@@ -4,6 +4,7 @@ import com.isoplatform.api.accident.AccidentHistory;
 import com.isoplatform.api.accident.repository.AccidentHistoryRepository;
 import com.isoplatform.api.accident.request.AccidentHistoryRequest;
 import com.isoplatform.api.accident.response.AccidentHistoryResponse;
+import com.isoplatform.api.exception.UnauthorizedException;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,8 +22,11 @@ public class AccidentHistoryService {
 
     @Transactional
     public AccidentHistoryResponse create(AccidentHistoryRequest request, Long userId) {
+        // VIN 정규화: 대문자 변환 및 공백 제거
+        String normalizedVin = request.getVin().trim().toUpperCase();
+
         AccidentHistory entity = AccidentHistory.builder()
-                .vin(request.getVin())
+                .vin(normalizedVin)
                 .accidentType(request.getAccidentType())
                 .accidentDate(request.getAccidentDate())
                 .repaired(request.isRepaired())
@@ -56,7 +60,7 @@ public class AccidentHistoryService {
                 .orElseThrow(() -> new EntityNotFoundException("사고 이력을 찾을 수 없습니다: " + id));
 
         if (!entity.getRegisteredBy().equals(userId)) {
-            throw new IllegalStateException("본인이 등록한 이력만 수정할 수 있습니다");
+            throw new UnauthorizedException("본인이 등록한 이력만 수정할 수 있습니다");
         }
 
         // VIN은 차량 식별자이므로 수정 불가
@@ -75,7 +79,7 @@ public class AccidentHistoryService {
                 .orElseThrow(() -> new EntityNotFoundException("사고 이력을 찾을 수 없습니다: " + id));
 
         if (!entity.getRegisteredBy().equals(userId)) {
-            throw new IllegalStateException("본인이 등록한 이력만 삭제할 수 있습니다");
+            throw new UnauthorizedException("본인이 등록한 이력만 삭제할 수 있습니다");
         }
 
         repository.deleteById(id);

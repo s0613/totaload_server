@@ -8,7 +8,9 @@ import com.isoplatform.api.auth.exception.OAuth2UserCannotLoginLocallyException;
 import com.isoplatform.api.exception.CertificateException;
 import com.isoplatform.api.exception.CertificateNotFoundException;
 import com.isoplatform.api.exception.ImageValidationException;
+import com.isoplatform.api.exception.UnauthorizedException;
 import com.isoplatform.api.exception.UserNotAuthenticatedException;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -183,6 +185,32 @@ public class GlobalExceptionHandler {
     }
 
     // ========== General Exceptions ==========
+
+    /**
+     * Handle EntityNotFoundException (JPA entity not found)
+     *
+     * @param ex the exception
+     * @return 404 Not Found with error response
+     */
+    @ExceptionHandler(EntityNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleEntityNotFound(EntityNotFoundException ex) {
+        log.warn("Entity not found: {}", ex.getMessage());
+        ErrorResponse error = new ErrorResponse("NOT_FOUND", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+    }
+
+    /**
+     * Handle UnauthorizedException (user lacks permission)
+     *
+     * @param ex the exception
+     * @return 403 Forbidden with error response
+     */
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ErrorResponse> handleUnauthorized(UnauthorizedException ex) {
+        log.warn("Unauthorized access: {}", ex.getMessage());
+        ErrorResponse error = new ErrorResponse("FORBIDDEN", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error);
+    }
 
     /**
      * Handle illegal argument exceptions
